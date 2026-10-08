@@ -79,16 +79,16 @@ import javax.inject.Inject;
 public final class WellbeingModel implements SafeCloseable {
     private static final String TAG = "WellbeingModel";
     private static final int[] RETRY_TIMES_MS = {5000, 15000, 30000};
-    private static final boolean DEBUG = true;
+    private static final boolean DEBUG = false;
 
     // Welbeing contract
     private static final String PATH_ACTIONS = "actions";
-    private static final String METHOD_GET_ACTIONS = "get_actions";
-    private static final String EXTRA_ACTIONS = "actions";
-    private static final String EXTRA_ACTION = "action";
+    public static final String METHOD_GET_ACTIONS = "get_actions";
+    public static final String EXTRA_ACTIONS = "actions";
+    public static final String EXTRA_ACTION = "action";
     private static final String EXTRA_MAX_NUM_ACTIONS_SHOWN = "max_num_actions_shown";
-    private static final String EXTRA_PACKAGES = "packages";
-    private static final String EXTRA_SUCCESS = "success";
+    public static final String EXTRA_PACKAGES = "packages";
+    public static final String EXTRA_SUCCESS = "success";
 
     public static final DaggerSingletonObject<WellbeingModel> INSTANCE =
             new DaggerSingletonObject<>(QuickstepBaseAppComponent::getWellbeingModel);
@@ -105,8 +105,6 @@ public final class WellbeingModel implements SafeCloseable {
     // Maps the action Id to the corresponding RemoteAction
     private final Map<String, RemoteAction> mActionIdMap = new ArrayMap<>();
     private final Map<String, String> mPackageToActionId = new HashMap<>();
-
-    private boolean mIsInTest;
 
     @Inject
     WellbeingModel(@ApplicationContext final Context context,
@@ -159,10 +157,6 @@ public final class WellbeingModel implements SafeCloseable {
         }
     }
 
-    public void setInTest(boolean inTest) {
-        mIsInTest = inTest;
-    }
-
     @WorkerThread
     private void restartObserver() {
         final ContentResolver resolver = mContext.getContentResolver();
@@ -173,7 +167,6 @@ public final class WellbeingModel implements SafeCloseable {
                     actionsUri, true /* notifyForDescendants */, mContentObserver);
         } catch (Exception e) {
             Log.e(TAG, "Failed to register content observer for " + actionsUri + ": " + e);
-            if (mIsInTest) throw new RuntimeException(e);
         }
         updateAllPackages();
     }
@@ -184,9 +177,7 @@ public final class WellbeingModel implements SafeCloseable {
         Preconditions.assertUIThread();
         // Work profile apps are not recognized by digital wellbeing.
         if (userId != UserHandle.myUserId()) {
-            if (DEBUG || mIsInTest) {
-                Log.w(TAG, "getShortcutForApp [" + packageName + "]: not current user");
-            }
+            if (DEBUG) Log.w(TAG, "getShortcutForApp [" + packageName + "]: not current user");
             return null;
         }
 
@@ -194,12 +185,10 @@ public final class WellbeingModel implements SafeCloseable {
             String actionId = mPackageToActionId.get(packageName);
             final RemoteAction action = actionId != null ? mActionIdMap.get(actionId) : null;
             if (action == null) {
-                if (DEBUG || mIsInTest) {
-                    Log.w(TAG, "getShortcutForApp [" + packageName + "]: no action");
-                }
+                if (DEBUG) Log.w(TAG, "getShortcutForApp [" + packageName + "]: no action");
                 return null;
             }
-            if (DEBUG || mIsInTest) {
+            if (DEBUG) {
                 Log.w(TAG,
                         "getShortcutForApp [" + packageName + "]: action: '" + action.getTitle()
                                 + "'");
@@ -211,7 +200,7 @@ public final class WellbeingModel implements SafeCloseable {
     private Uri.Builder apiBuilder() {
         return new Uri.Builder()
                 .scheme(SCHEME_CONTENT)
-                .authority(mWellbeingProviderPkg + ".api");
+                .authority(getApiAuthority(mWellbeingProviderPkg));
     }
 
     @WorkerThread
@@ -219,7 +208,7 @@ public final class WellbeingModel implements SafeCloseable {
         if (packageNames.length == 0) {
             return true;
         }
-        if (DEBUG || mIsInTest) {
+        if (DEBUG) {
             Log.d(TAG, "retrieveActions() called with: packageNames = [" + String.join(", ",
                     packageNames) + "]");
         }
@@ -230,7 +219,7 @@ public final class WellbeingModel implements SafeCloseable {
         try (ContentProviderClient client = mContext.getContentResolver()
                 .acquireUnstableContentProviderClient(contentUri)) {
             if (client == null) {
-                if (DEBUG || mIsInTest) Log.i(TAG, "retrieveActions(): null provider");
+                if (DEBUG) Log.i(TAG, "retrieveActions(): null provider");
                 return false;
             }
 
@@ -257,7 +246,7 @@ public final class WellbeingModel implements SafeCloseable {
 
                     final String[] packagesForAction =
                             actionBundle.getStringArray(EXTRA_PACKAGES);
-                    if (DEBUG || mIsInTest) {
+                    if (DEBUG) {
                         Log.d(TAG, "....actionId: " + actionId + ", packages: " + String.join(", ",
                                 packagesForAction));
                     }
@@ -271,16 +260,15 @@ public final class WellbeingModel implements SafeCloseable {
             return false;
         } catch (Exception e) {
             Log.e(TAG, "Failed to retrieve data from " + contentUri + ": " + e);
-            if (mIsInTest) throw new RuntimeException(e);
             return true;
         }
-        if (DEBUG || mIsInTest) Log.i(TAG, "retrieveActions(): finished");
+        if (DEBUG) Log.i(TAG, "retrieveActions(): finished");
         return true;
     }
 
     @WorkerThread
     private void updateActionsWithRetry(int retryCount, @Nullable String packageName) {
-        if (DEBUG || mIsInTest) {
+        if (DEBUG) {
             Log.i(TAG,
                     "updateActionsWithRetry(); retryCount: " + retryCount + ", package: "
                             + packageName);
@@ -302,7 +290,7 @@ public final class WellbeingModel implements SafeCloseable {
         }
         mWorkerExecutor.getHandler().postDelayed(
                 () -> {
-                    if (DEBUG || mIsInTest) Log.i(TAG, "Retrying; attempt " + (retryCount + 1));
+                    if (DEBUG) Log.i(TAG, "Retrying; attempt " + (retryCount + 1));
                     updateActionsWithRetry(retryCount + 1, packageName);
                 },
                 packageName, RETRY_TIMES_MS[retryCount]);
@@ -310,13 +298,13 @@ public final class WellbeingModel implements SafeCloseable {
 
     @WorkerThread
     private void updateAllPackages() {
-        if (DEBUG || mIsInTest) Log.i(TAG, "updateAllPackages");
+        if (DEBUG) Log.i(TAG, "updateAllPackages");
         updateActionsWithRetry(0, null);
     }
 
     @WorkerThread
     private void onAppPackageChanged(Intent intent) {
-        if (DEBUG || mIsInTest) Log.d(TAG, "Changes in apps: intent = [" + intent + "]");
+        if (DEBUG) Log.d(TAG, "Changes in apps: intent = [" + intent + "]");
         Preconditions.assertNonUiThread();
 
         final String packageName = intent.getData().getSchemeSpecificPart();
@@ -348,85 +336,8 @@ public final class WellbeingModel implements SafeCloseable {
                             info,
                             originalView);
 
-    public static final SystemShortcut.Factory<ActivityContext> PAUSE_APPS =
-            (activity, itemInfo, originalView) -> {
-                if (originalView == null) {
-                    return null;
-                }
-                String packageName = itemInfo.getTargetComponent().getPackageName();
-                PackageManager packageManager = originalView.getContext().getPackageManager();
-                if (Arrays.asList(packageManager.getUnsuspendablePackages(
-                        new String[]{packageName})).contains(packageName)) {
-                    return null;
-                }
-                if (packageManager.isPackageSuspendedForUser(
-                        itemInfo.getTargetComponent().getPackageName(),
-                        itemInfo.user.getIdentifier())) {
-                    return null;
-                }
-                return new PauseApps(activity, itemInfo, originalView);
-            };
-
-    public static class PauseApps<T extends ActivityContext> extends SystemShortcut<T> {
-
-        public PauseApps(T target, ItemInfo itemInfo, View originalView) {
-            super(R.drawable.ic_hourglass, R.string.paused_apps_drop_target_label, target,
-                    itemInfo, originalView);
-        }
-
-        @Override
-        public void onClick(View view) {
-            final Context context = view.getContext();
-            final String packageToSuspend = mItemInfo.getTargetComponent().getPackageName();
-            final UserHandle packageUser = mItemInfo.user;
-            final PackageManager packageManager = context.getPackageManager();
-            CharSequence appLabel = packageToSuspend;
-            try {
-                appLabel = packageManager.getApplicationLabel(
-                        packageManager.getApplicationInfoAsUser(packageToSuspend,
-                                PackageManager.ApplicationInfoFlags.of(0), packageUser));
-            } catch (PackageManager.NameNotFoundException e) {
-
-            }
-            new AlertDialog.Builder(context)
-                    .setTitle(context.getString(R.string.pause_apps_dialog_title, appLabel))
-                    .setMessage(context.getString(R.string.pause_apps_dialog_message, appLabel))
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .setPositiveButton(R.string.pause, (dialog, which) ->
-                            suspendPackages(context, List.of(packageToSuspend), packageUser))
-                    .show();
-            AbstractFloatingView.closeAllOpenViews(mTarget);
-        }
-    }
-
-    /** Suspends a list of packages in the target user. */
-    public static void suspendPackages(final @NonNull Context context,
-            final @NonNull List<String> packages,
-            final @NonNull UserHandle targetUser) {
-        Objects.requireNonNull(packages, "packages must not be null");
-        Objects.requireNonNull(targetUser, "targetUser must not be null");
-        try {
-            AppGlobals.getPackageManager().setPackagesSuspendedAsUser(
-                    /* packageNames */ packages.toArray(new String[0]),
-                    /* suspended */ true,
-                    /* appExtras */ null,
-                    /* launcherExtras */ null,
-                    buildSuspendDialog(),
-                    /* flags */ 0,
-                    /* suspendingPackage */ context.getOpPackageName(),
-                    /* suspendingUserId */ context.getUserId(),
-                    targetUser.getIdentifier());
-        } catch (RemoteException e) {
-            Log.e(TAG, "Failed to suspend " + targetUser + " packages: " + packages, e);
-        }
-    }
-
-    private static SuspendDialogInfo buildSuspendDialog() {
-        return new SuspendDialogInfo.Builder()
-                .setIcon(R.drawable.ic_hourglass_top)
-                .setTitle(R.string.paused_apps_dialog_title)
-                .setMessage(R.string.paused_apps_dialog_message)
-                .setNeutralButtonAction(SuspendDialogInfo.BUTTON_ACTION_UNSUSPEND)
-                .build();
+    /** Returns the content-provider authority for the wellbeing API */
+    public static String getApiAuthority(String wellbeingPkg) {
+        return wellbeingPkg + ".api";
     }
 }

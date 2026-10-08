@@ -78,10 +78,8 @@ public class AllAppsGridAdapter extends BaseAllAppsAdapter {
         mGridLayoutMgr = new AppsGridLayoutManager(mActivityContext.asContext());
         mAllowDrawerStyleModes = allowDrawerStyleModes;
         mGridLayoutMgr.setSpanSizeLookup(new GridSpanSizer());
-        mDrawerStyle = mAllowDrawerStyleModes
-                ? AppDrawerStyle.get(mActivityContext.asContext())
-                : AppDrawerStyle.NORMAL;
-        setAppsPerRow(activityContext.getDeviceProfile().numShownAllAppsColumns);
+        setAppsPerRow(
+                activityContext.getDeviceProfile().getAllAppsProfile().getNumShownAllAppsColumns());
     }
 
     public String getDrawerStyle() {

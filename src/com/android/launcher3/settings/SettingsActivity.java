@@ -16,10 +16,21 @@
 
 package com.android.launcher3.settings;
 
+import static android.os.Process.myUserHandle;
+import static android.provider.Settings.Global.DEVELOPMENT_SETTINGS_ENABLED;
+
 import static androidx.preference.PreferenceFragmentCompat.ARG_PREFERENCE_ROOT;
+
+import static com.android.launcher3.BuildConfig.IS_STUDIO_BUILD;
+import static com.android.launcher3.InvariantDeviceProfile.TYPE_MULTI_DISPLAY;
+import static com.android.launcher3.InvariantDeviceProfile.TYPE_TABLET;
+import static com.android.launcher3.util.Executors.MAIN_EXECUTOR;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.content.pm.LauncherApps;
+import android.content.res.Resources;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
@@ -42,10 +53,17 @@ import androidx.preference.PreferenceScreen;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.android.launcher3.BuildConfig;
-import com.android.launcher3.Flags;
+import com.android.launcher3.InvariantDeviceProfile;
 import com.android.launcher3.LauncherFiles;
 import com.android.launcher3.R;
+import com.android.launcher3.display.DisplayController;
+import com.android.launcher3.display.LauncherDisplayInfo;
+import com.android.launcher3.lineage.LineageUtils;
+import com.android.launcher3.lineage.trust.TrustAppsActivity;
+import com.android.launcher3.util.SafeCloseable;
 import com.android.launcher3.util.SettingsCache;
+import com.android.settingslib.widget.SettingsBasePreferenceFragment;
+import com.android.settingslib.widget.SettingsThemeHelper;
 
 import com.android.settingslib.collapsingtoolbar.CollapsingToolbarBaseActivity;
 import com.android.settingslib.widget.SettingsBasePreferenceFragment;
@@ -56,6 +74,15 @@ import com.android.settingslib.widget.SettingsBasePreferenceFragment;
 public class SettingsActivity extends CollapsingToolbarBaseActivity
         implements OnPreferenceStartFragmentCallback, OnPreferenceStartScreenCallback {
 
+    @VisibleForTesting
+    static final String DEVELOPER_OPTIONS_KEY = "pref_developer_options";
+
+    public static final String FIXED_LANDSCAPE_MODE = "pref_fixed_landscape_mode";
+
+    private static final String NOTIFICATION_DOTS_PREFERENCE_KEY = "pref_icon_badging";
+
+    private static final String SHOW_HOTSEAT_QSB_KEY = "pref_show_hotseat_qsb";
+
     public static final String EXTRA_FRAGMENT_ARGS = ":settings:fragment_args";
 
     // Intent extra to indicate the pref-key to highlighted when opening the settings activity
@@ -65,6 +92,13 @@ public class SettingsActivity extends CollapsingToolbarBaseActivity
 
     private static final int DELAY_HIGHLIGHT_DURATION_MILLIS = 600;
     public static final String SAVE_HIGHLIGHTED_KEY = "android:preference_highlighted";
+
+    private static final String KEY_MINUS_ONE = "pref_enable_minus_one";
+    private static final String SEARCH_PACKAGE = "com.google.android.googlequicksearchbox";
+    public static final String KEY_TRUST_APPS = "pref_trust_apps";
+
+    private static final String KEY_SUGGESTIONS = "pref_suggestions";
+    private static final String SUGGESTIONS_PACKAGE = "com.google.android.as";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -137,11 +171,23 @@ public class SettingsActivity extends CollapsingToolbarBaseActivity
         return super.onOptionsItemSelected(item);
     }
 
+    @Override
+    public Resources.Theme getTheme() {
+        Resources.Theme theme = super.getTheme();
+        if (SettingsThemeHelper.isExpressiveTheme(this)) {
+            theme.applyStyle(
+                    com.android.settingslib.widget.theme.R.style.Theme_SubSettingsBase_Expressive,
+                    true);
+        }
+        return theme;
+    }
+
     /**
      * This fragment shows the launcher preferences.
      */
-    public static class LauncherSettingsFragment extends SettingsBasePreferenceFragment implements
-            SettingsCache.OnChangeListener {
+    public static class LauncherSettingsFragment extends SettingsBasePreferenceFragment {
+
+        private @Nullable SafeCloseable mSettingCacheSafeCloseable;
 
         private boolean mRestartOnResume = false;
 
@@ -151,6 +197,20 @@ public class SettingsActivity extends CollapsingToolbarBaseActivity
 
         @Override
         public void onCreate(@Nullable Bundle savedInstanceState) {
+            if (BuildConfig.IS_DEBUG_DEVICE) {
+                // Query DEVELOPMENT_SETTINGS_ENABLED and recreate activity if such setting
+                // has changed.
+                Uri devUri = Settings.Global.getUriFor(DEVELOPMENT_SETTINGS_ENABLED);
+                SettingsCache settingsCache = SettingsCache.INSTANCE.get(getContext());
+                mDeveloperOptionsEnabled = settingsCache.getValue(devUri);
+                mSettingCacheSafeCloseable = settingsCache.getListenableRef(devUri).forEach(
+                        MAIN_EXECUTOR, (v) -> {
+                            if (v != mDeveloperOptionsEnabled) {
+                                tryRecreateActivity();
+                            }
+                            return null;
+                        });
+            }
             super.onCreate(savedInstanceState);
         }
 
@@ -247,6 +307,64 @@ public class SettingsActivity extends CollapsingToolbarBaseActivity
             outState.putBoolean(SAVE_HIGHLIGHTED_KEY, mPreferenceHighlighted);
         }
 
+        /**
+         * Initializes a preference. This is called for every preference. Returning false here
+         * will remove that preference from the list.
+         */
+        protected boolean initPreference(Preference preference) {
+            LauncherApps launcherApps = getContext().getSystemService(LauncherApps.class);
+            LauncherDisplayInfo info = DisplayController.INSTANCE.get(getContext()).getInfo();
+            switch (preference.getKey()) {
+                case NOTIFICATION_DOTS_PREFERENCE_KEY:
+                    return BuildConfig.NOTIFICATION_DOTS_ENABLED;
+                case DEVELOPER_OPTIONS_KEY:
+                    if (IS_STUDIO_BUILD) {
+                        preference.setOrder(0);
+                    }
+                    return mDeveloperOptionsEnabled;
+                case FIXED_LANDSCAPE_MODE:
+                    if ((InvariantDeviceProfile.INSTANCE.get(getContext()).deviceType
+                                    == TYPE_MULTI_DISPLAY)
+                            || (InvariantDeviceProfile.INSTANCE.get(getContext()).deviceType
+                                    == TYPE_TABLET)) {
+                        return false;
+                    }
+                    // When the setting changes rotate the screen accordingly to showcase the result
+                    // of the setting
+                    preference.setOnPreferenceChangeListener(
+                            (pref, newValue) -> {
+                                getActivity().setRequestedOrientation(
+                                        (boolean) newValue
+                                                ? ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                                                : ActivityInfo.SCREEN_ORIENTATION_USER
+                                );
+                                return true;
+                            }
+                    );
+                    return !info.isLargeScreen(info.realBounds);
+                case KEY_MINUS_ONE:
+                    return launcherApps != null &&
+                            launcherApps.isPackageEnabled(SEARCH_PACKAGE, myUserHandle());
+                case KEY_SUGGESTIONS:
+                    return launcherApps != null &&
+                            launcherApps.isPackageEnabled(SUGGESTIONS_PACKAGE, myUserHandle());
+                case KEY_TRUST_APPS:
+                    preference.setOnPreferenceClickListener(p -> {
+                        LineageUtils.showLockScreen(getActivity(),
+                                getString(R.string.trust_apps_manager_name), () -> {
+                            Intent intent = new Intent(getActivity(), TrustAppsActivity.class);
+                            startActivity(intent);
+                        });
+                        return true;
+                    });
+                    return true;
+                case SHOW_HOTSEAT_QSB_KEY:
+                    return launcherApps != null &&
+                            launcherApps.isPackageEnabled(SEARCH_PACKAGE, myUserHandle());
+            }
+            return true;
+        }
+
         @Override
         public void onResume() {
             super.onResume();
@@ -265,9 +383,12 @@ public class SettingsActivity extends CollapsingToolbarBaseActivity
         }
 
         @Override
-        public void onSettingsChanged(boolean isEnabled) {
-            // Developer options changed, try recreate
-            tryRecreateActivity();
+        public void onDestroy() {
+            super.onDestroy();
+            if (mSettingCacheSafeCloseable != null) {
+                mSettingCacheSafeCloseable.close();
+                mSettingCacheSafeCloseable = null;
+            }
         }
 
         /**

@@ -29,7 +29,6 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Outline;
-import android.graphics.Path;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.drawable.AdaptiveIconDrawable;
@@ -51,7 +50,6 @@ import com.android.launcher3.dragndrop.FolderAdaptiveIcon;
 import com.android.launcher3.graphics.PathWrapper;
 import com.android.launcher3.graphics.ShapeDelegate;
 import com.android.launcher3.graphics.ThemeManager;
-import com.android.launcher3.icons.IconShape;
 
 /**
  * A view used to draw both layers of an {@link AdaptiveIconDrawable}.

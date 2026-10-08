@@ -19,6 +19,7 @@
 -->
 <manifest
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     package="com.android.launcher3">
     <uses-sdk android:targetSdkVersion="36" android:minSdkVersion="36"/>
     <!--
@@ -36,12 +37,18 @@
         android:fullBackupContent="@xml/backupscheme"
         android:hardwareAccelerated="true"
         android:debuggable="true"
-        android:icon="@drawable/ic_launcher_home"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/derived_app_name"
         android:theme="@style/AppTheme"
         android:largeHeap="@bool/config_largeHeap"
         android:restoreAnyVersion="true"
-        android:supportsRtl="true" >
+        android:supportsRtl="true"
+        tools:replace="android:icon">
+
+        <!-- App Functions Metadata -->
+        <property
+            android:name="android.app.appfunctions.app_metadata"
+            android:resource="@xml/app_metadata" />
 
         <!--
         Main launcher activity. When extending only change the name, and keep all the
@@ -90,5 +97,15 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name="androidx.appfunctions.service.ExtensionAppFunctionService"
+            android:permission="android.permission.BIND_APP_FUNCTION_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.app.appfunctions.AppFunctionService" />
+            </intent-filter>
+        </service>
+
     </application>
 </manifest>

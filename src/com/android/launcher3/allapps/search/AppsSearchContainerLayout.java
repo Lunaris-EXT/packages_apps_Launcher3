@@ -25,9 +25,6 @@ import static com.android.launcher3.icons.IconNormalizer.ICON_VISIBLE_AREA_FACTO
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.res.Resources;
-import android.graphics.drawable.Drawable;
-import android.graphics.drawable.PaintDrawable;
 import android.graphics.Rect;
 import android.net.Uri;
 import android.text.Selection;
@@ -45,7 +42,6 @@ import com.android.launcher3.ExtendedEditText;
 import com.android.launcher3.Insettable;
 import com.android.launcher3.LauncherPrefs;
 import com.android.launcher3.R;
-import com.android.launcher3.qsb.QsbContainerView;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.allapps.ActivityAllAppsContainerView;
 import com.android.launcher3.allapps.AllAppsStore;
@@ -54,8 +50,6 @@ import com.android.launcher3.allapps.PrivateProfileManager;
 import com.android.launcher3.allapps.SearchUiManager;
 import com.android.launcher3.search.SearchCallback;
 import com.android.launcher3.util.ApiWrapper;
-import com.android.launcher3.util.Themes;
-import com.android.launcher3.graphics.ThemeManager;
 import com.android.launcher3.views.ActivityContext;
 
 import java.util.ArrayList;
@@ -133,11 +127,12 @@ public class AppsSearchContainerLayout extends ExtendedEditText
             int rowWidth = myRequestedWidth - widthSource.getPaddingLeft()
                     - widthSource.getPaddingRight();
 
-            int cellWidth = DeviceProfile.calculateCellWidth(rowWidth,
-                    dp.getWorkspaceIconProfile().getCellLayoutBorderSpacePx().x, dp.numShownHotseatIcons);
-            int iconVisibleSize =
-                    Math.round(ICON_VISIBLE_AREA_FACTOR * dp.getWorkspaceIconProfile().getIconSizePx());
-            int iconPadding = cellWidth - iconVisibleSize;
+        int cellWidth = DeviceProfile.calculateCellWidth(rowWidth,
+                dp.getWorkspaceProfile().getCellLayoutBorderSpacePx().x,
+                dp.getHotseatProfile().getNumShownIcons());
+        int iconVisibleSize =
+                Math.round(ICON_VISIBLE_AREA_FACTOR * dp.getWorkspaceProfile().getIconSizePx());
+        int iconPadding = cellWidth - iconVisibleSize;
 
                 int myWidth = rowWidth - iconPadding + getPaddingLeft() + getPaddingRight();
                 super.onMeasure(makeMeasureSpec(myWidth, EXACTLY), heightMeasureSpec);
@@ -284,7 +279,7 @@ public class AppsSearchContainerLayout extends ExtendedEditText
     public void initializeSearch(ActivityAllAppsContainerView<?> appsView) {
         mAppsView = appsView;
         mSearchBarController.initialize(
-                new DefaultAppSearchAlgorithm(getContext(), true),
+                new DefaultAppSearchAlgorithm(getContext(), mLauncher.getUiExecutor(), true),
                 this, mLauncher, this);
     }
 
@@ -301,6 +296,12 @@ public class AppsSearchContainerLayout extends ExtendedEditText
     @Override
     public void focusSearchField() {
         mSearchBarController.focusSearchField();
+    }
+
+    @Override
+    public boolean isSearchQueryEmpty() {
+        String query = Utilities.trim(getEditableText().toString());
+        return query.isEmpty();
     }
 
     @Override
@@ -324,7 +325,7 @@ public class AppsSearchContainerLayout extends ExtendedEditText
 
     @Override
     public void onSearchResult(String query, ArrayList<AdapterItem> items) {
-        if (query.equalsIgnoreCase(mContext.getString(R.string.private_space_label))) {
+        if (query.equalsIgnoreCase(getContext().getString(R.string.private_space_label))) {
             privateSpaceQuery();
             return;
         }
@@ -346,7 +347,10 @@ public class AppsSearchContainerLayout extends ExtendedEditText
     @Override
     public void setInsets(Rect insets) {
         MarginLayoutParams mlp = (MarginLayoutParams) getLayoutParams();
-        mlp.topMargin = getResources().getDimensionPixelSize(R.dimen.all_apps_search_bar_margin_top);
+        if (mAppsView.getSearchUiDelegate().isSearchBarFloating()
+                || mLauncher.getDeviceProfile().getDeviceProperties().isLargeScreen()) {
+            mlp.topMargin = insets.top;
+        }
         requestLayout();
     }
 
@@ -361,7 +365,7 @@ public class AppsSearchContainerLayout extends ExtendedEditText
             privateProfileManager.setQuietMode(false);
         } else if (!mAppsView.hasPrivateProfile()) {
             final Intent privateSpaceSettingsIntent =
-                    ApiWrapper.INSTANCE.get(mContext).getPrivateSpaceSettingsIntent();
+                    ApiWrapper.INSTANCE.get(getContext()).getPrivateSpaceSettingsIntent();
             if (privateSpaceSettingsIntent != null) {
                 mLauncher.startActivitySafely(mAppsView, privateSpaceSettingsIntent, null);
             }

@@ -30,12 +30,12 @@ import com.android.launcher3.dagger.LauncherAppComponent
 import com.android.launcher3.dagger.LauncherAppSingleton
 import com.android.launcher3.model.DeviceGridState
 import com.android.launcher3.pm.InstallSessionHelper
+import com.android.launcher3.popup.ui.ExpandedSection
 import com.android.launcher3.provider.RestoreDbTask
-import com.android.launcher3.provider.RestoreDbTask.FIRST_LOAD_AFTER_RESTORE_KEY
-import com.android.launcher3.settings.SettingsMisc
-import com.android.launcher3.states.RotationHelper
+import com.android.launcher3.provider.RestoreDbTask.Companion.FIRST_LOAD_AFTER_RESTORE_KEY
+import com.android.launcher3.settings.SettingsActivity
 import com.android.launcher3.util.DaggerSingletonObject
-import com.android.launcher3.util.DisplayController
+import com.android.launcher3.util.DefaultsValueProvider
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 
@@ -55,7 +55,7 @@ constructor(@ApplicationContext private val encryptedContext: Context) {
             .getSharedPreferences(BOOT_AWARE_PREFS_KEY, MODE_PRIVATE)
     }
 
-    open protected fun getSharedPrefs(item: Item): SharedPreferences =
+    protected open fun getSharedPrefs(item: Item): SharedPreferences =
         item.run {
             if (encryptionType == EncryptionType.DEVICE_PROTECTED) {
                 deviceProtectedSharedPrefs
@@ -108,6 +108,10 @@ constructor(@ApplicationContext private val encryptedContext: Context) {
                 sp.getLong(item.sharedPrefKey, default as Long)
             Set::class.java.isAssignableFrom(item.type) ->
                 sp.getStringSet(item.sharedPrefKey, default as? Set<String>)
+            item.type.isEnum -> {
+                val name = sp.getString(item.sharedPrefKey, (default as Enum<*>).name)
+                item.type.enumConstants?.find { (it as Enum<*>).name == name } ?: default
+            }
             else ->
                 throw IllegalArgumentException(
                     "item type: ${item.type}" + " is not compatible with sharedPref methods"
@@ -180,6 +184,7 @@ constructor(@ApplicationContext private val encryptedContext: Context) {
                 putLong(item.sharedPrefKey, value as Long)
             Set::class.java.isAssignableFrom(item.type) ->
                 putStringSet(item.sharedPrefKey, value as? Set<String>)
+            item.type.isEnum -> putString(item.sharedPrefKey, (value as Enum<*>).name)
             else ->
                 throw IllegalArgumentException(
                     "item type: ${item.type} is not compatible with sharedPref methods"
@@ -252,6 +257,8 @@ constructor(@ApplicationContext private val encryptedContext: Context) {
     companion object {
         @VisibleForTesting const val BOOT_AWARE_PREFS_KEY = "boot_aware_prefs"
 
+        const val COMPOSITION_TRACING_PREF_KEY = "pref_enableCompositionTracing"
+
         @JvmField val INSTANCE = DaggerSingletonObject(LauncherAppComponent::getLauncherPrefs)
 
         @JvmStatic fun get(context: Context): LauncherPrefs = INSTANCE.get(context)
@@ -259,91 +266,20 @@ constructor(@ApplicationContext private val encryptedContext: Context) {
         const val TASKBAR_PINNING_KEY = "TASKBAR_PINNING_KEY"
         const val TASKBAR_PINNING_DESKTOP_MODE_KEY = "TASKBAR_PINNING_DESKTOP_MODE_KEY"
 
+        const val ENABLE_TWO_LINE_TOGGLE_KEY: String = "pref_enable_two_line_toggle"
+
         @JvmField
-        val ENABLE_TWOLINE_ALLAPPS_TOGGLE = backedUpItem("pref_enable_two_line_toggle", false)
-        @JvmField val WORKSPACE_LOCK = backedUpItem("pref_workspace_lock", false)
-        @JvmField val ALL_APPS_DARK_TEXT = backedUpItem("pref_all_apps_dark_text", false)
-        @JvmField val ALL_APPS_SEARCH_PLACEMENT = backedUpItem("pref_allapps_search_placement", "top")
-        @JvmField val ALLAPPS_ICON_CUSTOMIZATION = backedUpItem("pref_allapps_icon_customization", true)
-        @JvmField val ALLOW_WALLPAPER_ZOOMING = backedUpItem("pref_allow_wallpaper_zooming", true)
-        @JvmField val APP_DRAWER_CUSTOM_COLOR_ENABLED = backedUpItem("pref_app_drawer_custom_color_enabled", false)
-        @JvmField val APP_LAUNCH_BLUR_ENABLED = backedUpItem("pref_app_launch_blur", false)
-        @JvmField val APP_DRAWER_CUSTOM_COLOR_LIGHT = backedUpItem("pref_app_drawer_custom_color_light", -1)
-        @JvmField val OVERSCROLL_STIFFNESS = backedUpItem("pref_overscroll_stiffness", 200)
-        @JvmField val OVERSCROLL_DAMPING_RATIO = backedUpItem("pref_overscroll_damping_ratio", 50)
-        @JvmField val OVERSCROLL_MAX_STRETCH = backedUpItem("pref_overscroll_max_stretch", 15)
-        @JvmField val OVERSCROLL_VELOCITY_SCALE = backedUpItem("pref_overscroll_velocity_scale", 25)
-        @JvmField val APP_DRAWER_CUSTOM_COLOR_DARK = backedUpItem("pref_app_drawer_custom_color_dark", -16777216)
-        @JvmField val APP_DRAWER_OPACITY = backedUpItem("pref_app_drawer_opacity", 60)
-        @JvmField val APP_DRAWER_SORT_MODE = backedUpItem("pref_app_drawer_sorting_mode", "alphabetical")
-        @JvmField val APP_DRAWER_STYLE = backedUpItem("pref_app_drawer_style", "normal")
-        @JvmField val APP_DRAWER_STYLE_IOS_MIGRATED = nonRestorableItem("pref_app_drawer_style_ios_migrated", false)
-        @JvmField val AUTO_HIDE_DOTS = backedUpItem("pref_auto_hide_dots", true)
-        @JvmField val BLUR_DEPTH = backedUpItem("pref_blur_depth", 30)
-        @JvmField val DARK_STATUS_BAR = backedUpItem("pref_dark_status_bar", false)
-        @JvmField val NOTIFICATION_BADGE_COUNT = backedUpItem("pref_notification_badge_count", false)
-        @JvmField val DOCK_MUSIC_SEARCH = backedUpItem("pref_dock_music_search", false)
-        @JvmField val COMPACT_SEARCH_BAR = backedUpItem("pref_compact_search_bar", false)
-        @JvmField val COMPACT_SEARCH_BAR_ACTION = backedUpItem("pref_compact_search_bar_action", "google_search")
-        @JvmField val QSB_STYLE_GOOGLE = backedUpItem("pref_qsb_style_google", true)
-        @JvmField val DOCK_SEARCH = backedUpItem("pref_dock_search", true)
-        @JvmField val DOCK_SEARCH_WIDGET = backedUpItem("pref_dock_search_widget", "")
-        @JvmField
-        val DOCK_SEARCH_WIDGET_PENDING_CONFIG =
-            backedUpItem("pref_dock_search_widget_pending_config", false)
-        @JvmField val DOCK_THEME = backedUpItem("pref_dock_theme", false)
+        val ENABLE_TWOLINE_ALLAPPS_TOGGLE =
+            backedUpItem(ENABLE_TWO_LINE_TOGGLE_KEY, Boolean::class.java) { context ->
+                DefaultsValueProvider.get(context).enableTwoLineToggle
+            }
+
+        @JvmField val ALLAPPS_THEMED_ICONS = backedUpItem("pref_allapps_themed_icons", false)
         @JvmField val DRAWER_OPEN_KEYBOARD = backedUpItem("pref_drawer_open_keyboard", false)
-        @JvmField val DRAWER_SCROLLBAR = backedUpItem("pref_drawer_scrollbar", true)
-        @JvmField val DRAWER_LIST = backedUpItem("pref_drawer_list", true)
-        @JvmField val FONT_SIZE = backedUpItem("pref_custom_font_size", 100)
-        @JvmField val FREEFORM_GESTURE = backedUpItem("pref_start_freeform_by_gesture", false)
-        @JvmField val OVERVIEW_GESTURE_ACTION = backedUpItem("pref_overview_gesture_action", "freeform")
-        @JvmField val FREEFORM_GESTURE_PROGRESS = backedUpItem("pref_start_freeform_progress", 20)
-        @JvmField val SWIPE_DOWN_TO_LOCK = backedUpItem("pref_swipe_down_to_lock", false)
-        @JvmField val HOTSEAT_OPACITY = backedUpItem("pref_hotseat_opacity", 40)
-        @JvmField val HOTSEAT_QSB_OPACITY = backedUpItem("pref_hotseat_qsb_opacity", 100)
-        @JvmField val HOTSEAT_QSB_STROKE_WIDTH = backedUpItem("pref_hotseat_qsb_stroke_width", 0)
-        @JvmField val HOTSEAT_QSB_HEIGHT = backedUpItem("pref_hotseat_qsb_height", true)
-        @JvmField val HOTSEAT_BOTTOM_SPACE_DEFAULT = backedUpItem("pref_hotseat_bottom_space_default", true)
-        @JvmField val ICON_SIZE = backedUpItem("pref_custom_icon_size", 100)
-        @JvmField val RECENTS_CLEAR_ALL = backedUpItem("pref_recents_clear_all", true)
-        @JvmField val RECENTS_LENS = backedUpItem("pref_recents_lens", true)
-        @JvmField val RECENTS_MEMINFO = backedUpItem("pref_recents_meminfo", false)
-        @JvmField val RECENTS_MEMINFO_ZRAM = backedUpItem("pref_recents_meminfo_zram", false)
-        @JvmField val RECENTS_STYLE = backedUpItem("pref_recents_style", "default")
-        @JvmField val RECENTS_OPACITY = backedUpItem("pref_recents_opacity", 40)
-        @JvmField
-        val RECENTS_TASK_CORNER_RADIUS = backedUpItem("pref_recents_task_corner_radius", 26)
-        @JvmField val RECENTS_NEW_OVERVIEW_STYLE = backedUpItem("pref_recents_new_overview_style", true)
-        @JvmField val RECENTS_SCREENSHOT = backedUpItem("pref_recents_screenshot", true)
-        @JvmField val RECENTS_SCROLL_VIBRATE = backedUpItem("pref_recents_scroll_vibrate", true)
-        @JvmField val ROW_HEIGHT = backedUpItem("pref_row_height", 100)
-        @JvmField val SEARCH_RADIUS_SIZE = backedUpItem("pref_search_radius_size", 100)
-        @JvmField val SERAPHIX_HOLDER_ID = backedUpItem("pref_seraphix_holder_id", -1)
-        @JvmField val SHORT_PARALLAX = backedUpItem("pref_short_parallax", false)
         @JvmField val SHOW_DESKTOP_LABELS = backedUpItem("pref_desktop_show_labels", true)
         @JvmField val SHOW_DRAWER_LABELS = backedUpItem("pref_drawer_show_labels", true)
-        @JvmField val SHOW_HOTSEAT_BG = backedUpItem("pref_show_hotseat_bg", false)
-        @JvmField val SHOW_QUICKSPACE = backedUpItem("pref_quickspace", true)
-        @JvmField val SHOW_QUICKSPACE_ALT = backedUpItem("pref_quickspace_alt", false)
-        @JvmField val QUICKSPACE_UI_STYLE = backedUpItem("pref_quickspace_style", "0")
-        @JvmField
-        val QUICKSPACE_CLOCK_CUSTOM_COLOR =
-            backedUpItem("pref_quickspace_clock_custom_color", false)
-        @JvmField
-        val QUICKSPACE_CLOCK_COLOR =
-            backedUpItem("pref_quickspace_clock_color", 0xFFFE4543.toInt())
-        @JvmField val SHOW_QUICKSPACE_PSONALITY = backedUpItem("pref_quickspace_psonality", true)
-        @JvmField val SHOW_QUICKSPACE_NOWPLAYING = backedUpItem("pref_quickspace_np", true)
-        @JvmField val SHOW_QUICKSPACE_WEATHER = backedUpItem("pref_quickspace_weather", true)
-        @JvmField val SHOW_QUICKSPACE_WEATHER_CITY = backedUpItem("pref_quickspace_weather_city", false)
-        @JvmField val SHOW_QUICKSPACE_WEATHER_PROVIDER = backedUpItem("pref_quickspace_weather_provider", "auto")
-        @JvmField val SHOW_QUICKSPACE_WEATHER_TEXT = backedUpItem("pref_quickspace_weather_text", true)
-        @JvmField val SHOW_STATUS_BAR = backedUpItem("pref_show_statusbar", true)
-        @JvmField val SHOW_TOP_SHADOW = backedUpItem("pref_show_top_shadow", true)
-        @JvmField val SINGLE_PAGE_CENTER = backedUpItem("pref_single_page_center", false)
-        @JvmField val SLEEP_GESTURE = backedUpItem("pref_sleep_gesture", true)
-        @JvmField val SLEEP_GESTURE_HAPTIC = backedUpItem("pref_sleep_gesture_haptic", true)
+        @JvmField val SLEEP_GESTURE = backedUpItem("pref_sleep_gesture", false)
+        @JvmField val WORKSPACE_LOCK = backedUpItem("pref_workspace_lock", false)
         @JvmField
         val PROMISE_ICON_IDS = nonRestorableItem(InstallSessionHelper.PROMISE_ICON_IDS, "")
         @JvmField val WALLPAPER_CAROUSEL = backedUpItem("pref_wallpaper_carousel", true)
@@ -402,14 +338,18 @@ constructor(@ApplicationContext private val encryptedContext: Context) {
                 encryptionType = EncryptionType.ENCRYPTED,
                 type = String::class.java,
             )
-        @JvmField
-        val ALLOW_ROTATION =
-            backedUpItem(RotationHelper.ALLOW_ROTATION_PREFERENCE_KEY, Boolean::class.java) {
-                RotationHelper.getAllowRotationDefaultValue(it, DisplayController.INSTANCE.get(it).info)
-            }
+
+        @JvmField val ENABLE_COMPOSITION_TRACING = backedUpItem(COMPOSITION_TRACING_PREF_KEY, false)
 
         @JvmField
         val FIXED_LANDSCAPE_MODE = backedUpItem(SettingsMisc.FIXED_LANDSCAPE_MODE, false)
+
+        @JvmField
+        val WORKSPACE_ITEMS_LABEL_HIDDEN = backedUpItem("pref_workspace_items_label_hidden", false)
+
+        @JvmField
+        val EXPANDED_POPUP_MENU_SECTION =
+            backedUpItem("pref_expanded_popup_menu", ExpandedSection.SYSTEM)
 
         @JvmField
         val NON_FIXED_LANDSCAPE_GRID_NAME =
@@ -425,6 +365,29 @@ constructor(@ApplicationContext private val encryptedContext: Context) {
         @JvmField
         val RECONFIGURABLE_WIDGET_EDUCATION_TIP_SEEN =
             backedUpItem("launcher.reconfigurable_widget_education_tip_seen", false)
+
+        // Preferences for Launcher statistics
+        /* Format: a string converted from List<Long>. Sorted descendingly (latest to earliest). */
+        @JvmField
+        val ALL_APPS_TIP_SHOWN_TIMESTAMPS =
+            backedUpItem("launcher.all_apps_tip_shown_timestamps", "")
+
+        @JvmField val ALL_APPS_OPEN_UP_COUNT = backedUpItem("launcher.all_apps_open_up_count", 0)
+
+        @JvmField val INITIAL_TIMESTAMP = backedUpItem("launcher.initial_timestamp", 0L)
+
+        @JvmField val SELECT_TIP_SEEN = backedUpItem("launcher.select_tip_seen", false)
+
+        @JvmField val SHOW_HOTSEAT_QSB = backedUpItem("pref_show_hotseat_qsb", false)
+
+        @JvmStatic
+        fun isHotseatQsbEnabled(context: Context): Boolean {
+            return try {
+                get(context).get(SHOW_HOTSEAT_QSB)
+            } catch (ignored: IllegalStateException) {
+                true
+            }
+        }
 
         @JvmStatic
         fun <T> backedUpItem(

@@ -47,10 +47,13 @@ import com.android.internal.util.ArrayUtils;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.config.FeatureFlags;
 import com.android.launcher3.dagger.ApplicationContext;
+import com.android.launcher3.dagger.DisplayId;
+import com.android.launcher3.dagger.PerDisplaySingleton;
+import com.android.launcher3.display.DisplayController;
+import com.android.launcher3.display.LauncherDisplayInfo;
 import com.android.launcher3.taskbar.TaskbarInteractor;
+import com.android.launcher3.taskbar.bubbles.BubbleHelper;
 import com.android.launcher3.util.DaggerSingletonObject;
-import com.android.launcher3.util.DisplayController;
-import com.android.launcher3.util.RunnableList;
 import com.android.quickstep.dagger.QuickstepBaseAppComponent;
 import com.android.quickstep.util.ActiveGestureLog;
 import com.android.quickstep.util.ActiveGestureProtoLogProxy;
@@ -63,10 +66,6 @@ import com.android.systemui.shared.system.QuickStepContract;
 import com.android.systemui.shared.system.TaskStackChangeListener;
 import com.android.systemui.shared.system.TaskStackChangeListeners;
 
-import dagger.assisted.Assisted;
-import dagger.assisted.AssistedFactory;
-import dagger.assisted.AssistedInject;
-
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -75,6 +74,9 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import javax.inject.Inject;
+
+@PerDisplaySingleton
 public class TaskAnimationManager implements RecentsAnimationCallbacks.RecentsAnimationListener {
 
     private static final String TAG = "TaskAnimationManager";
@@ -127,7 +129,9 @@ public class TaskAnimationManager implements RecentsAnimationCallbacks.RecentsAn
                 RecentsView recentsView = containerInterface.getCreatedContainer()
                         .getOverviewPanel();
                 if (recentsView != null) {
-                    recentsView.launchSideTaskInLiveTileModeForRestartedApp(task.taskId);
+                    if (!BubbleHelper.isAppBubbleTask(task)) {
+                        recentsView.launchSideTaskInLiveTileModeForRestartedApp(task.taskId);
+                    }
                     TaskStackChangeListeners.getInstance().unregisterTaskStackListener(
                             mLiveTileRestartListener);
                 }
@@ -135,10 +139,10 @@ public class TaskAnimationManager implements RecentsAnimationCallbacks.RecentsAn
         }
     };
 
-    @AssistedInject
+    @Inject
     public TaskAnimationManager(
             @ApplicationContext Context ctx,
-            @Assisted int displayId,
+            @DisplayId int displayId,
             DisplayController displayController,
             PerDisplayRepository<TaskAnimationManager> perDisplayRepository) {
         mCtx = ctx;
@@ -386,7 +390,7 @@ public class TaskAnimationManager implements RecentsAnimationCallbacks.RecentsAn
                 RemoteAnimationTarget appearedTaskTarget = appearedTaskTargets[0];
                 BaseContainerInterface containerInterface =
                         mLastGestureState.getContainerInterface();
-                DisplayController.Info displayInfo = mDisplayController.getInfoForDisplay(
+                LauncherDisplayInfo displayInfo = mDisplayController.getInfoForDisplay(
                         mDisplayId);
                 for (RemoteAnimationTarget compat : appearedTaskTargets) {
                     if (compat.windowConfiguration.getActivityType() == ACTIVITY_TYPE_HOME
@@ -424,8 +428,10 @@ public class TaskAnimationManager implements RecentsAnimationCallbacks.RecentsAn
                         ActiveGestureProtoLogProxy.logLaunchingSideTaskFailed();
                     }
                 } else if (nonAppTargets.length > 0) {
-                    TaskViewUtils.createSplitAuxiliarySurfacesAnimator(nonAppTargets /* nonApps */,
-                            true /*shown*/, null /* animatorHandler */);
+                    SplitRecentsAnimUtils splitRecentsAnimUtils =
+                            new SplitRecentsAnimUtils(nonAppTargets);
+                    splitRecentsAnimUtils.fadeInDimLayer(/* immediate= */ true);
+                    splitRecentsAnimUtils.fadeInDivider(/* immediate= */ true);
                 }
                 if (mController != null) {
                     mLastAppearedTaskTargets = appearedTaskTargets;
@@ -472,7 +478,7 @@ public class TaskAnimationManager implements RecentsAnimationCallbacks.RecentsAn
             mRecentsAnimationStartPending = getSystemUiProxy().startRecentsTransition(intent,
                     options, mCallbacks, gestureState.useSyntheticRecentsTransition(), null,
                     mDisplayId);
-            recentsWindowManager.showRecentsWindow(mCallbacks);
+            MAIN_EXECUTOR.execute(() -> recentsWindowManager.showRecentsWindow(mCallbacks));
         } else {
             mRecentsAnimationStartPending = getSystemUiProxy().startRecentsTransition(intent,
                     options, mCallbacks, false /* useSyntheticRecentsTransition */, null,
@@ -590,7 +596,6 @@ public class TaskAnimationManager implements RecentsAnimationCallbacks.RecentsAn
             @Nullable RecentsAnimationController controller,
             @NonNull ActiveGestureLog.CompoundString reason) {
         if (controller != null) {
-            ActiveGestureProtoLogProxy.logFinishRunningRecentsAnimation(toHome, reason);
             ActiveGestureLog.CompoundString reasonString = new ActiveGestureLog.CompoundString(
                     "TaskAnimationManager.finishRunningRecentsAnimation: ")
                     .append(reason);
@@ -643,11 +648,22 @@ public class TaskAnimationManager implements RecentsAnimationCallbacks.RecentsAn
     }
 
     void onLauncherDestroyed() {
-        onLauncherDestroyed(/* onForceFinishComplete= */ null);
-    }
-
-    void onLauncherDestroyed(@Nullable Runnable onForceFinishComplete) {
-        addLauncherDestroyedCallback(onForceFinishComplete);
+        if (mController != null) {
+            finishRunningRecentsAnimation(
+                    /* toHome= */ false,
+                    /* forceFinish= */ true,
+                    /* forceFinishCb= */ null,
+                    mController,
+                    /* reason= */ new ActiveGestureLog.CompoundString(
+                            "TaskAnimationManager.onLauncherDestroyed"));
+            return;
+        }
+        if (!mRecentsAnimationStartPending) {
+            return;
+        }
+        if (mCallbacks == null) {
+            return;
+        }
         if (mLauncherDestroyCallbackSet) {
             return;
         }
@@ -782,11 +798,4 @@ public class TaskAnimationManager implements RecentsAnimationCallbacks.RecentsAn
             mLastGestureState.dump(prefix + '\t', pw);
         }
     }
-
-    @AssistedFactory
-    public interface Factory {
-        /** Creates a new instance of [TaskAnimationManager] for a given [displayId]. */
-        TaskAnimationManager create(int displayId);
-    }
-
 }

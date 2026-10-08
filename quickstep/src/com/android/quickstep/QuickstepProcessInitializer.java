@@ -17,12 +17,14 @@ package com.android.quickstep;
 
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.graphics.ImageDecoder;
 import android.os.Looper;
 import android.os.Trace;
 import android.os.UserManager;
 import android.util.Log;
-import android.graphics.ImageDecoder;
+import android.view.SurfaceControl;
 import android.view.ThreadedRenderer;
+import android.view.ViewRootImpl;
 
 import com.android.launcher3.BuildConfig;
 import com.android.launcher3.MainProcessInitializer;
@@ -38,13 +40,17 @@ import javax.inject.Inject;
 public class QuickstepProcessInitializer extends MainProcessInitializer {
 
     private static final String TAG = "QuickstepProcessInitializer";
-    private static final int SETUP_DELAY_MILLIS = 5000;
 
     @Inject
     public QuickstepProcessInitializer() {
-        // Fake call to create an instance of InteractionJankMonitor to avoid binder calls during
-        // its initialization during transitions.
-        InteractionJankMonitorWrapper.cancel(-1);
+        try {
+            // Fake call to create an instance of InteractionJankMonitor to avoid binder calls
+            // during its initialization during transitions.
+            InteractionJankMonitorWrapper.cancel(-1);
+        } catch (Throwable t) {
+            Log.w(TAG, "InteractionJankMonitor.cancel failed. This call is not critical"
+                    + " but this failure can affect performance testing", t);
+        }
     }
 
     @Override
@@ -98,6 +104,8 @@ public class QuickstepProcessInitializer extends MainProcessInitializer {
         }
 
         QuickstepProtoLogGroup.initProtoLog();
+        SurfaceControl.setDebugUsageAfterRelease(true);
+        ViewRootImpl.setDebugWrongThreadInit(true);
 
         setupImageDecoder(context);
     }

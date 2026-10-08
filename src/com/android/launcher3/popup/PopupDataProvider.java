@@ -34,7 +34,6 @@ import com.android.launcher3.model.data.FolderInfo;
 import com.android.launcher3.model.data.ItemInfo;
 import com.android.launcher3.notification.NotificationRepository;
 import com.android.launcher3.util.ComponentKey;
-import com.android.launcher3.util.Executors;
 import com.android.launcher3.util.LauncherBindableItemsContainer.ItemOperator;
 import com.android.launcher3.util.PackageUserKey;
 import com.android.launcher3.util.ShortcutUtil;
@@ -70,18 +69,7 @@ public class PopupDataProvider {
         mBgDataModel = dataModel;
 
         mContext.closeOnDestroy(mNotificationRepo.getUpdateStream().forEach(
-                Executors.MAIN_EXECUTOR, this::updateNotificationDots));
-        SharedPreferences prefs = LauncherPrefs.getPrefs(mContext.asContext());
-        SharedPreferences.OnSharedPreferenceChangeListener notificationBadgeCountListener =
-                (sharedPreferences, key) -> {
-                    if (LauncherPrefs.NOTIFICATION_BADGE_COUNT.getSharedPrefKey().equals(key)) {
-                        Executors.MAIN_EXECUTOR.execute(
-                                () -> updateNotificationDots(packageUserKey -> true));
-                    }
-                };
-        prefs.registerOnSharedPreferenceChangeListener(notificationBadgeCountListener);
-        mContext.closeOnDestroy(() ->
-                prefs.unregisterOnSharedPreferenceChangeListener(notificationBadgeCountListener));
+                mContext.getUiExecutor(), this::updateNotificationDots));
     }
 
     private Unit updateNotificationDots(Predicate<PackageUserKey> updatedDots) {

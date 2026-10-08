@@ -63,24 +63,7 @@ interface TaskViewShortFactory {
         override fun onClick(view: View) {
             val recentsView = taskView.recentsView ?: return
             dismissTaskMenuView()
-            recentsView.dismissTaskView(taskView, true, true)
-            val pkg = taskView.itemInfo.targetComponent?.packageName
-            if (!pkg.isNullOrEmpty()) {
-                try {
-                    val iam: IActivityManager = ActivityManagerNative.getDefault()
-                    iam.forceStopPackage(pkg, UserHandle.USER_CURRENT)
-
-                    Toast.makeText(
-                        mTarget.asContext(),
-                        R.string.recents_app_killed,
-                        Toast.LENGTH_SHORT
-                    ).show()
-                } catch (e: RemoteException) {
-                    // Ignore
-                } catch (t: Throwable) {
-                    // Ignore
-                }
-            }
+            recentsView.dismissTaskView(taskView, /* removeTask= */ true)
             mTarget.statsLogManager
                 .logger()
                 .withItemInfo(taskView.itemInfo)

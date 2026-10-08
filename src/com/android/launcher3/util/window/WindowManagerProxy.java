@@ -19,6 +19,7 @@ import static android.view.Display.DEFAULT_DISPLAY;
 
 import static com.android.launcher3.Utilities.dpToPx;
 import static com.android.launcher3.Utilities.dpiFromPx;
+import static com.android.launcher3.taskbar.TaskbarManagerImpl.ENABLE_TASKBAR_URI;
 import static com.android.launcher3.testing.shared.ResourceUtils.INVALID_RESOURCE_HANDLE;
 import static com.android.launcher3.testing.shared.ResourceUtils.NAVBAR_HEIGHT;
 import static com.android.launcher3.testing.shared.ResourceUtils.NAVBAR_HEIGHT_LANDSCAPE;
@@ -50,14 +51,15 @@ import android.view.WindowMetrics;
 import androidx.annotation.NonNull;
 import androidx.annotation.VisibleForTesting;
 
-import com.android.launcher3.Flags;
 import com.android.launcher3.R;
 import com.android.launcher3.dagger.LauncherAppSingleton;
 import com.android.launcher3.dagger.LauncherBaseAppComponent;
+import com.android.launcher3.display.DisplayController;
+import com.android.launcher3.display.LauncherDisplayInfo;
 import com.android.launcher3.testing.shared.ResourceUtils;
 import com.android.launcher3.util.DaggerSingletonObject;
-import com.android.launcher3.util.DisplayController;
 import com.android.launcher3.util.NavigationMode;
+import com.android.launcher3.util.SettingsCache;
 import com.android.launcher3.util.WindowBounds;
 
 import java.util.ArrayList;
@@ -109,23 +111,9 @@ public class WindowManagerProxy {
     }
 
     /**
-     * Returns if we are in desktop mode or not.
-     */
-    public boolean isInDesktopMode(int displayId) {
-        return false;
-    }
-
-    /**
      * Returns if the display is in desktop-first mode.
      */
     public boolean isDisplayDesktopFirst(Context displayInfoContext) {
-        return false;
-    }
-
-    /**
-     * Returns if the pinned taskbar should be shown when home is visible.
-     */
-    public boolean showLockedTaskbarOnHome(Context displayInfoContext) {
         return false;
     }
 
@@ -138,10 +126,11 @@ public class WindowManagerProxy {
     }
 
     /**
-     * Returns if the home is visible.
+     * Returns whether the context's display is landscape by default.
      */
-    public boolean isHomeVisible() {
-        return false;
+    private boolean isDefaultLandscape(Context context) {
+        CachedDisplayInfo info = getDisplayInfo(context).normalize(this);
+        return info.size.x > info.size.y;
     }
 
     /**
@@ -155,9 +144,10 @@ public class WindowManagerProxy {
         // uses DisplayController instance to determine whether taskbar is shown on home, and this
         // method gets called while initializing DisaplayController.
         normalizeWindowInsets(displayInfoContext,
-                showLockedTaskbarOnHome(displayInfoContext) || showDesktopTaskbarForFreeformDisplay(
-                        displayInfoContext), windowMetrics.getWindowInsets(), insets);
-        return new WindowBounds(windowMetrics.getBounds(), insets, info.rotation);
+                showDesktopTaskbarForFreeformDisplay(displayInfoContext),
+                windowMetrics.getWindowInsets(), insets);
+        return new WindowBounds(windowMetrics.getBounds(), insets, info.rotation,
+                (int) (windowMetrics.getDensity() * 160));
     }
 
     /**
@@ -166,9 +156,8 @@ public class WindowManagerProxy {
     public WindowInsets normalizeWindowInsets(Context context,
             WindowInsets oldInsets,
             Rect outInsets) {
-        return normalizeWindowInsets(context,
-                DisplayController.showLockedTaskbarOnHome(context)
-                        || DisplayController.showDesktopTaskbarForFreeformDisplay(context),
+        LauncherDisplayInfo info = DisplayController.getInfo(context);
+        return normalizeWindowInsets(context, info.getShowDesktopTaskbarForFreeformDisplay(),
                 oldInsets, outInsets);
     }
 
@@ -182,6 +171,7 @@ public class WindowManagerProxy {
 
         WindowInsets.Builder insetsBuilder = new WindowInsets.Builder(oldInsets);
         Insets navInsets = oldInsets.getInsets(WindowInsets.Type.navigationBars());
+        Insets cutoutInsets = oldInsets.getInsets(WindowInsets.Type.displayCutout());
 
         Resources systemRes = context.getResources();
         Configuration config = systemRes.getConfiguration();
@@ -189,17 +179,20 @@ public class WindowManagerProxy {
         boolean isLargeScreen = config.smallestScreenWidthDp > MIN_TABLET_WIDTH;
         boolean isGesture = isGestureNav(context);
         boolean isPortrait = config.screenHeightDp > config.screenWidthDp;
+        boolean isDefaultLandscape = isDefaultLandscape(context);
+
+        int navBarHeight = getDimenByName(systemRes,
+                isPortrait ? NAVBAR_HEIGHT : NAVBAR_HEIGHT_LANDSCAPE);
 
         int bottomNav = isLargeScreen
-                ? 0
-                : (isPortrait
-                        ? getDimenByName(systemRes, NAVBAR_HEIGHT)
-                        : (isGesture
-                                ? getDimenByName(systemRes, NAVBAR_HEIGHT_LANDSCAPE)
-                                : 0));
+                ? isTaskbarEnabled(context) ? 0 : getDimenByName(systemRes, NAVBAR_HEIGHT)
+                : ((isPortrait != isDefaultLandscape || isGesture
+                        ? navBarHeight
+                        : 0)
+                + cutoutInsets.bottom);
         int leftNav = navInsets.left;
         int rightNav = navInsets.right;
-        if (!isLargeScreen && !isGesture && !isPortrait) {
+        if (!isLargeScreen && !isGesture && isPortrait == isDefaultLandscape) {
             // In 3-button landscape/seascape, Launcher should always have nav insets regardless if
             // it's initiated from fullscreen apps.
             int navBarWidth = getDimenByName(systemRes, NAVBAR_LANDSCAPE_LEFT_RIGHT_SIZE);
@@ -322,7 +315,7 @@ public class WindowManagerProxy {
      */
     protected List<WindowBounds> estimateWindowBounds(Context context,
             final CachedDisplayInfo displayInfo) {
-        int densityDpi = context.getResources().getConfiguration().densityDpi;
+        int densityDpi = displayInfo.densityDpi;
         final int rotation = displayInfo.rotation;
 
         int minSize = Math.min(displayInfo.size.x, displayInfo.size.y);
@@ -347,15 +340,16 @@ public class WindowManagerProxy {
                 STATUS_BAR_HEIGHT_LANDSCAPE, STATUS_BAR_HEIGHT);
 
         int navBarHeightPortrait, navBarHeightLandscape, navbarWidthLandscape;
+        int tabletNavBarHeight = mTaskbarDrawnInProcess
+                ? (isTaskbarEnabled(context) ? 0 : getDimenByName(systemRes, NAVBAR_HEIGHT))
+                : context.getResources().getDimensionPixelSize(R.dimen.taskbar_size);
 
         navBarHeightPortrait = isTablet
-                ? (mTaskbarDrawnInProcess
-                        ? 0 : context.getResources().getDimensionPixelSize(R.dimen.taskbar_size))
+                ? tabletNavBarHeight
                 : getDimenByName(systemRes, NAVBAR_HEIGHT);
 
         navBarHeightLandscape = isTablet
-                ? (mTaskbarDrawnInProcess
-                        ? 0 : context.getResources().getDimensionPixelSize(R.dimen.taskbar_size))
+                ? tabletNavBarHeight
                 : (isTabletOrGesture
                         ? getDimenByName(systemRes, NAVBAR_HEIGHT_LANDSCAPE) : 0);
         navbarWidthLandscape = isTabletOrGesture
@@ -375,6 +369,12 @@ public class WindowManagerProxy {
                 navBarHeight = navBarHeightPortrait;
                 navbarWidth = 0;
                 statusBarHeight = statusBarHeightPortrait;
+            } else if (!isTabletOrGesture
+                    && (i == Surface.ROTATION_0 || i == Surface.ROTATION_180)) {
+                // Naturally landscape phone displays keep the 3-button navigation bar at the bottom
+                navBarHeight = navBarHeightPortrait;
+                navbarWidth = 0;
+                statusBarHeight = statusBarHeightLandscape;
             } else {
                 navBarHeight = navBarHeightLandscape;
                 navbarWidth = navbarWidthLandscape;
@@ -400,7 +400,7 @@ public class WindowManagerProxy {
             } else {
                 insets.right = Math.max(insets.right, navbarWidth);
             }
-            result.add(new WindowBounds(bounds, insets, i));
+            result.add(new WindowBounds(bounds, insets, i, densityDpi));
         }
         return result;
     }
@@ -425,6 +425,10 @@ public class WindowManagerProxy {
                 context.getResources(), INVALID_RESOURCE_HANDLE) == 2;
     }
 
+    protected boolean isTaskbarEnabled(Context context) {
+        return SettingsCache.INSTANCE.get(context).getValue(ENABLE_TASKBAR_URI);
+    }
+
     /**
      * Returns a CachedDisplayInfo initialized for the current display
      */
@@ -441,6 +445,7 @@ public class WindowManagerProxy {
     protected CachedDisplayInfo getDisplayInfo(WindowMetrics windowMetrics, int rotation) {
         Point size = new Point(windowMetrics.getBounds().right, windowMetrics.getBounds().bottom);
         return new CachedDisplayInfo(size, rotation,
+                (int) (windowMetrics.getDensity() * 160),
                 windowMetrics.getWindowInsets().getDisplayCutout());
     }
 
@@ -489,6 +494,14 @@ public class WindowManagerProxy {
     }
 
     /**
+     * Returns true if the display associated with the context is an external display, as opposed
+     * to the default display or a non-display context.
+     */
+    public boolean isExternalDisplay(Context displayInfoContext) {
+        return getDisplayId(displayInfoContext) != DEFAULT_DISPLAY;
+    }
+
+    /**
      * Returns a DisplayCutout which represents a rotated version of the original
      */
     protected DisplayCutout rotateCutout(DisplayCutout original, int startWidth, int startHeight,
@@ -524,11 +537,6 @@ public class WindowManagerProxy {
         return NavigationMode.NO_BUTTON;
     }
 
-    /** Returns whether overview on connected displays is enabled */
-    public boolean enableOverviewOnConnectedDisplays() {
-        return Flags.enableOverviewOnConnectedDisplays();
-    }
-
     /**
      * @see DisplayCutout#getSafeInsets
      */
@@ -536,52 +544,4 @@ public class WindowManagerProxy {
         return new Rect(cutout.getSafeInsetLeft(), cutout.getSafeInsetTop(),
                 cutout.getSafeInsetRight(), cutout.getSafeInsetBottom());
     }
-
-    /** Registers a listener for Taskbar changes in Desktop Mode.  */
-    public void registerDesktopVisibilityListener(DesktopVisibilityListener listener) { }
-
-    /** Removes a previously registered listener for Taskbar changes in Desktop Mode.  */
-    public void unregisterDesktopVisibilityListener(DesktopVisibilityListener listener) { }
-
-    /** A listener for when the user enters/exits Desktop Mode.  */
-    public interface DesktopVisibilityListener {
-        /**
-         * Called whenever the conditions that allow the creation of desks change.
-         *
-         * @param canCreateDesks whether it is possible to create new desks.
-         */
-        default void onCanCreateDesksChanged(boolean canCreateDesks) {
-        }
-
-        /**
-         * Called when a new desk is added.
-         *
-         * @param displayId The ID of the display on which the desk was added.
-         * @param deskId The ID of the newly added desk.
-         */
-        default void onDeskAdded(int displayId, int deskId) {}
-
-        /**
-         * Called when an existing desk is removed.
-         *
-         * @param displayId The ID of the display on which the desk was removed.
-         * @param deskId The ID of the desk that was removed.
-         */
-        default void onDeskRemoved(int displayId, int deskId) {}
-
-        /**
-         * Called when the active desk changes.
-         *
-         * @param displayId The ID of the display on which the desk activation change is happening.
-         * @param newActiveDesk The ID of the new active desk or -1 if no desk is active anymore
-         *                      (i.e. exit desktop mode).
-         * @param oldActiveDesk The ID of the desk that was previously active, or -1 if no desk was
-         *                      active before.
-         */
-        default void onActiveDeskChanged(int displayId, int newActiveDesk, int oldActiveDesk) {}
-
-        /** Called when the listener is initialised from shell. */
-        default void onListenerInitializedFromShell() {}
-    }
-
 }

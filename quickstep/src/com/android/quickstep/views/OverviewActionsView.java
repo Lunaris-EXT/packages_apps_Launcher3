@@ -16,8 +16,6 @@
 
 package com.android.quickstep.views;
 
-import static com.android.launcher3.util.OverviewReleaseFlags.enableGridOnlyOverview;
-
 import android.app.ActivityManager;
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -50,8 +48,7 @@ import com.android.launcher3.LauncherPrefs;
 import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.anim.AnimatedFloat;
-import com.android.launcher3.util.DisplayController;
-import com.android.launcher3.util.MemoryUtils;
+import com.android.launcher3.display.DisplayController;
 import com.android.launcher3.util.MultiValueAlpha;
 import com.android.launcher3.util.NavigationMode;
 import com.android.launcher3.util.VibratorWrapper;
@@ -580,7 +577,7 @@ public class OverviewActionsView<T extends OverlayUICallbacks> extends FrameLayo
         assert mDp != null;
         // Update flags to see if split button should be hidden.
         updateSplitButtonHiddenFlags(FLAG_SMALL_SCREEN_HIDE_SPLIT,
-                !mDp.getDeviceProperties().isTablet() ||
+                !mDp.getDeviceProperties().isLargeScreen() ||
                 getContext().getSystemService(ActivityManager.class).isLowRamDevice());
         updateActionButtonsVisibility();
     }
@@ -590,13 +587,11 @@ public class OverviewActionsView<T extends OverlayUICallbacks> extends FrameLayo
             return;
         }
         boolean showSingleTaskActions = !mIsGroupedTask;
-        boolean showGroupActions = mIsGroupedTask && mDp.getDeviceProperties().isTablet() &&
-                mCanSaveAppPair &&
-                !getContext().getSystemService(ActivityManager.class).isLowRamDevice();
-        if (DEBUG) {
-            Log.d(TAG, "updateActionButtonsVisibility() called: showSingleTaskActions = ["
-                    + showSingleTaskActions + "], showGroupActions = [" + showGroupActions + "]");
-        }
+        boolean showGroupActions = mIsGroupedTask && mDp.getDeviceProperties().isLargeScreen()
+                && mCanSaveAppPair
+                && !getContext().getSystemService(ActivityManager.class).isLowRamDevice();
+        Log.d(TAG, "updateActionButtonsVisibility() called: showSingleTaskActions = ["
+                + showSingleTaskActions + "], showGroupActions = [" + showGroupActions + "]");
         getActionsAlphas().get(INDEX_GROUPED_ALPHA).setValue(showSingleTaskActions ? 1 : 0);
         getGroupActionsAlphas().get(INDEX_GROUPED_ALPHA).setValue(showGroupActions ? 1 : 0);
     }
@@ -704,7 +699,7 @@ public class OverviewActionsView<T extends OverlayUICallbacks> extends FrameLayo
             return 0;
         }
 
-        if (mDp.getDeviceProperties().isTablet() && enableGridOnlyOverview()) {
+        if (mDp.getDeviceProperties().isLargeScreen()) {
             int modalTaskbarHeight = mDp.getTaskbarProfile().isTransientTaskbar()
                     ? mDp.getTaskbarProfile().getStashedTaskbarHeight()
                     : mDp.getTaskbarProfile().getHeight();
@@ -733,24 +728,15 @@ public class OverviewActionsView<T extends OverlayUICallbacks> extends FrameLayo
 
         requestLayout();
 
-        if (mIsNewStyle) {
-            int splitIconRes = dp.isLeftRightSplit
-                    ? R.drawable.ic_split_horizontal
-                    : R.drawable.ic_split_vertical;
-            mSplitButton.setImageResource(splitIconRes);
+        int splitIconRes = dp.getSysuiProfile().isLeftRightSplit()
+                ? R.drawable.ic_split_horizontal
+                : R.drawable.ic_split_vertical;
+        mSplitButton.setCompoundDrawablesRelativeWithIntrinsicBounds(splitIconRes, 0, 0, 0);
 
-            int appPairIconRes = dp.isLeftRightSplit
-                    ? R.drawable.ic_save_app_pair_left_right
-                    : R.drawable.ic_save_app_pair_up_down;
-            mSaveAppPairButton.setImageResource(appPairIconRes);
-        } else {
-            mSplitButtonLegacy.setCompoundDrawablesRelativeWithIntrinsicBounds(
-                    dp.isLeftRightSplit ? R.drawable.ic_split_horizontal : R.drawable.ic_split_vertical,
-                    0, 0, 0);
-            mSaveAppPairButtonLegacy.setCompoundDrawablesRelativeWithIntrinsicBounds(
-                    dp.isLeftRightSplit ? R.drawable.ic_save_app_pair_left_right
-                                        : R.drawable.ic_save_app_pair_up_down,
-                    0, 0, 0);
-        }
+        int appPairIconRes = dp.getSysuiProfile().isLeftRightSplit()
+                ? R.drawable.ic_save_app_pair_left_right
+                : R.drawable.ic_save_app_pair_up_down;
+        mSaveAppPairButton.setCompoundDrawablesRelativeWithIntrinsicBounds(
+                appPairIconRes, 0, 0, 0);
     }
 }

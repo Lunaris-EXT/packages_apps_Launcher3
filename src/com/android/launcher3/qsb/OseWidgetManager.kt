@@ -21,28 +21,30 @@ import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetManager.INVALID_APPWIDGET_ID
 import android.appwidget.AppWidgetProviderInfo
 import android.appwidget.AppWidgetProviderInfo.WIDGET_CATEGORY_SEARCHBOX
+import android.appwidget.AppWidgetProviderInfo.WIDGET_FEATURE_CONFIGURATION_OPTIONAL
+import android.appwidget.AppWidgetProviderInfo.WIDGET_FEATURE_HIDE_FROM_PICKER
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.util.Log
-import android.widget.RemoteViews
 import android.widget.Toast
 import androidx.annotation.VisibleForTesting
 import com.android.launcher3.BaseActivity
 import com.android.launcher3.InvariantDeviceProfile
 import com.android.launcher3.InvariantDeviceProfile.OnIDPChangeListener
-import com.android.launcher3.LauncherConstants.ActivityCodes.REQUEST_BIND_DOCK_SEARCH_WIDGET
-import com.android.launcher3.LauncherConstants.ActivityCodes.REQUEST_CONFIGURE_DOCK_SEARCH_WIDGET
+import com.android.launcher3.LauncherConstants.ActivityCodes.REQUEST_RECONFIGURE_APPWIDGET
+import com.android.launcher3.LauncherPrefChangeListener
 import com.android.launcher3.LauncherPrefs
 import com.android.launcher3.R
 import com.android.launcher3.dagger.ApplicationContext
 import com.android.launcher3.dagger.LauncherAppSingleton
+import com.android.launcher3.graphics.theme.ThemePreference
 import com.android.launcher3.qsb.OSEManager.Companion.OSE_LOOPER
-import com.android.launcher3.qsb.QsbAppWidgetHost.Callbacks
+import com.android.launcher3.qsb.OSEManager.OSEInfo
 import com.android.launcher3.util.DaggerSingletonTracker
-import com.android.launcher3.util.Executors.MAIN_EXECUTOR
-import com.android.launcher3.util.MutableListenableRef
+import com.android.launcher3.util.PackageUserKey
+import com.android.launcher3.widget.WidgetManagerHelper
 import com.android.launcher3.widget.util.WidgetSizeHandler
 import javax.inject.Inject
 
@@ -61,73 +63,62 @@ constructor(
     private val sizeHandler: WidgetSizeHandler,
     private val idp: InvariantDeviceProfile,
     tracker: DaggerSingletonTracker,
+    themePreference: ThemePreference,
 ) {
 
-    private val mutableProviderInfo = MutableListenableRef<AppWidgetProviderInfo?>(null)
-    val providerInfo = mutableProviderInfo.asListenable()
+    private val mutableState = QsbAppWidgetHost.MutableState()
 
-    private val mutableViews = MutableListenableRef<RemoteViews?>(null)
-    val views = mutableViews.asListenable()
+    val providerInfo = mutableState.providerInfo.asListenable()
+    val views = mutableState.views.asListenable()
 
     private val executor = OSE_LOOPER
 
-    @Volatile private var pendingConfigActivity = false
-    @Volatile private var pendingBindRequest = false
+    private var lastOseInfo: OSEInfo? = null
 
     init {
-        widgetHost.setCallbacks(
-            object : Callbacks {
-
-                override fun onProviderChanged(appWidget: AppWidgetProviderInfo?) =
-                    mutableProviderInfo.dispatchValue(appWidget)
-
-                override fun onViewsChanged(views: RemoteViews?) = mutableViews.dispatchValue(views)
-            }
-        )
-        widgetHost.startListening()
-
-        tracker.addCloseable(oseManager.oseInfo.forEach(executor) { reloadWidget() })
-
-        val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (LauncherPrefs.DOCK_SEARCH_WIDGET.sharedPrefKey == key) {
-                executor.execute { reloadWidget() }
-            }
-        }
-        LauncherPrefs.getPrefs(context).registerOnSharedPreferenceChangeListener(prefListener)
-        tracker.addCloseable {
-            LauncherPrefs.getPrefs(context).unregisterOnSharedPreferenceChangeListener(prefListener)
-        }
+        tracker.addCloseable(widgetHost.addCallbacks(mutableState))
+        tracker.addCloseable(oseManager.oseInfo.forEach(executor, this::handleOseInfoUpdate))
 
         val idpListener = OnIDPChangeListener { updateWidgetSizeAsync() }
         idp.addOnChangeListener(idpListener)
-        tracker.addCloseable {
-            idp.removeOnChangeListener(idpListener)
-            widgetHost.stopListening()
+        tracker.addCloseable(themePreference.forEach(executor) { updateWidgetSizeAsync() })
+        tracker.addCloseable { idp.removeOnChangeListener(idpListener) }
+
+        try {
+            val prefs = LauncherPrefs.get(context)
+            val listener = LauncherPrefChangeListener { key ->
+                if (key == LauncherPrefs.SHOW_HOTSEAT_QSB.sharedPrefKey) {
+                    executor.execute { handleQsbPreferenceChange() }
+                }
+            }
+            prefs.addListener(listener, LauncherPrefs.SHOW_HOTSEAT_QSB)
+            tracker.addCloseable { prefs.removeListener(listener, LauncherPrefs.SHOW_HOTSEAT_QSB) }
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Failed to register QSB preference listener", e)
         }
 
         executor.execute { reloadWidget() }
     }
 
-    private fun reloadWidget() {
-        if (!DockSearchWidgetHelper.isCustomWidgetEnabled(context)) {
-            clearActiveWidget()
+    private fun handleOseInfoUpdate(info: OSEInfo) {
+        lastOseInfo = info
+
+        if (!LauncherPrefs.isHotseatQsbEnabled(context)) {
+            releaseActiveWidget()
             return
         }
 
-        val selectedProvider =
-            DockSearchWidgetHelper.getSelectedProvider(context)
-                ?: run {
-                    clearActiveWidget()
-                    return
-                }
-
-        val searchWidget =
-            DockSearchWidgetHelper.getProviderInfo(context, selectedProvider)
-                ?: findSearchWidgetForPackage(context, selectedProvider.packageName)
-                ?: run {
-                    clearActiveWidget()
-                    return
-                }
+        // If the package is null, leave it to the current value as the OSEManager
+        // may not have initialized yet
+        val providerPkg =
+            if (info.pkg != null) {
+                info.pkg
+            } else {
+                // When defaultSearchPackage is disabled oseInfo pkg is null.
+                dispatchNullValues()
+                return
+            }
+        val searchWidget = findSearchWidgetForPackage(context, providerPkg)
 
         val currentWidgetId = widgetHost.getBoundWidgetId()
         val currentInfo =
@@ -165,7 +156,15 @@ constructor(
         }
     }
 
-    private fun clearActiveWidget() {
+    private fun handleQsbPreferenceChange() {
+        if (LauncherPrefs.isHotseatQsbEnabled(context)) {
+            lastOseInfo?.let { handleOseInfoUpdate(it) }
+        } else {
+            releaseActiveWidget()
+        }
+    }
+
+    private fun releaseActiveWidget() {
         widgetHost.setActiveWidget(INVALID_APPWIDGET_ID, null)
         dispatchNullValues()
     }
@@ -173,13 +172,13 @@ constructor(
     private fun updateWidgetSizeAsync() {
         val widgetId = widgetHost.getActiveWidgetId()
         if (widgetId != INVALID_APPWIDGET_ID) {
-            sizeHandler.updateSizeRangesAsync(widgetId, idp.numColumns, 1, executor)
+            sizeHandler.updateHotseatQsbSizeRangesAsync(widgetId, executor)
         }
     }
 
     private fun dispatchNullValues() {
-        if (mutableProviderInfo.value != null) mutableProviderInfo.dispatchValue(null)
-        if (mutableViews.value != null) mutableViews.dispatchValue(null)
+        if (mutableState.providerInfo.value != null) mutableState.providerInfo.dispatchValue(null)
+        if (mutableState.views.value != null) mutableState.views.dispatchValue(null)
     }
 
     /** Launches the system bind permission flow when silent bind was denied. */
@@ -271,14 +270,20 @@ constructor(
 
         @VisibleForTesting
         fun findSearchWidgetForPackage(context: Context, pkg: String): AppWidgetProviderInfo? {
-            val eligible =
-                AppWidgetManager.getInstance(context)
-                    .installedProviders
-                    .filter { it.provider.packageName == pkg }
-                    .filter { DockSearchWidgetHelper.isEligibleDockSearchWidget(context, it) }
-            return eligible.firstOrNull {
-                (it.widgetCategory and WIDGET_CATEGORY_SEARCHBOX) != 0
-            } ?: eligible.firstOrNull()
+            val allEligibleWidgets =
+                WidgetManagerHelper(context)
+                    .getAllProviders(PackageUserKey(pkg, myUserHandle()))
+                    .filter {
+                        it.configure == null ||
+                            ((it.widgetFeatures and WIDGET_FEATURE_CONFIGURATION_OPTIONAL) != 0)
+                    }
+            val allSearchBoxWidgets =
+                allEligibleWidgets.filter { (it.widgetCategory and WIDGET_CATEGORY_SEARCHBOX) != 0 }
+            return allSearchBoxWidgets.firstOrNull {
+                // If multiple search box widgets are available, choose the widget that is
+                // not hidden from the picker
+                (it.widgetFeatures and WIDGET_FEATURE_HIDE_FROM_PICKER) == 0
+            } ?: allSearchBoxWidgets.firstOrNull() ?: allEligibleWidgets.firstOrNull()
         }
     }
 }

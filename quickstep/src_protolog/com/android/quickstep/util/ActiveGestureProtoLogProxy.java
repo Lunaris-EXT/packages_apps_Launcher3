@@ -83,28 +83,29 @@ public class ActiveGestureProtoLogProxy {
         }
     }
 
-    public static void logOverviewCommandRecoveredAfterLauncherGone() {
-        ActiveGestureLog.INSTANCE.addLog("Recovered stuck overview command after Launcher was "
-                + "gone; this indicates a launcher relaunch race");
-        if (willProtoLog()) {
-            ProtoLog.d(PROTO_LOG_GROUP, "Recovered stuck overview command after Launcher was "
-                    + "gone; this indicates a launcher relaunch race");
-        }
-    }
-
     public static void logAbsSwipeUpHandlerOnRecentsAnimationStartTimedOut() {
-        ActiveGestureLog.INSTANCE.addLog("AbsSwipeUpHandler.onRecentsAnimationStartTimedOut");
+        ActiveGestureLog.INSTANCE.addLog(
+                /* event= */ "AbsSwipeUpHandler.onRecentsAnimationStartTimedOut");
         if (willProtoLog()) {
             ProtoLog.d(PROTO_LOG_GROUP, "AbsSwipeUpHandler.onRecentsAnimationStartTimedOut");
         }
     }
 
-    public static void logAbsSwipeUpHandlerOnRecentsAnimationFinished() {
+    public static void logRecentsAnimationCallbacksOnRecentsAnimationFinished() {
         ActiveGestureLog.INSTANCE.addLog(
                 /* event= */ "RecentsAnimationCallbacks.onAnimationFinished",
                 ON_FINISH_RECENTS_ANIMATION);
         if (willProtoLog()) {
-            ProtoLog.d(PROTO_LOG_GROUP, "AbsSwipeUpHandler.onAnimationFinished");
+            ProtoLog.d(PROTO_LOG_GROUP, "RecentsAnimationCallbacks.onAnimationFinished");
+        }
+    }
+
+    public static void logRecentsAnimationCallbacksOnAnimationStartTimedOut() {
+        ActiveGestureLog.INSTANCE.addLog(
+                /* event= */ "RecentsAnimationCallbacks.onRecentsAnimationStartTimedOut");
+        if (willProtoLog()) {
+            ProtoLog.d(PROTO_LOG_GROUP,
+                    "RecentsAnimationCallbacks.onRecentsAnimationStartTimedOut");
         }
     }
 
@@ -138,15 +139,6 @@ public class ActiveGestureProtoLogProxy {
                 /* gestureEvent= */ ON_CANCEL_RECENTS_ANIMATION);
         if (willProtoLog()) {
             ProtoLog.d(PROTO_LOG_GROUP, "RecentsAnimationCallbacks.onAnimationCanceled");
-        }
-    }
-
-    public static void logRecentsAnimationCallbacksOnAnimationStartTimedOut() {
-        ActiveGestureLog.INSTANCE.addLog(
-                "RecentsAnimationCallbacks.onRecentsAnimationStartTimedOut");
-        if (willProtoLog()) {
-            ProtoLog.d(PROTO_LOG_GROUP,
-                    "RecentsAnimationCallbacks.onRecentsAnimationStartTimedOut");
         }
     }
 
@@ -444,18 +436,6 @@ public class ActiveGestureProtoLogProxy {
         }
     }
 
-    public static void logFinishRunningRecentsAnimation(boolean toHome,
-            @NonNull ActiveGestureLog.CompoundString reason) {
-        ActiveGestureLog.INSTANCE.addLog(new ActiveGestureLog.CompoundString(
-                "TaskAnimationManager.finishRunningRecentsAnimation: toHome=%b, reason=",
-                toHome).append(reason));
-        if (willProtoLog()) {
-            ProtoLog.d(PROTO_LOG_GROUP,
-                    "TaskAnimationManager.finishRunningRecentsAnimation: toHome=%b, reason=%s",
-                    toHome, reason.toString());
-        }
-    }
-
     public static void logOnRecentsAnimationStartCancelled() {
         ActiveGestureLog.INSTANCE.addLog("RecentsAnimationCallbacks.onAnimationStart (canceled): 0",
                 /* gestureEvent= */ ON_START_RECENTS_ANIMATION);
@@ -657,6 +637,15 @@ public class ActiveGestureProtoLogProxy {
         if (willProtoLog()) {
             ProtoLog.d(PROTO_LOG_GROUP, "calculateEndTarget: endTarget=%s, reason=%s", endTarget,
                     reason.toString());
+        }
+    }
+
+    public static void logEarlyExitForCanceledAnimation(@NonNull String startNewTask) {
+        ActiveGestureLog.INSTANCE.addLog(new ActiveGestureLog.CompoundString(
+                "%s: aborting due to canceled shift animation", startNewTask));
+        if (willProtoLog()) {
+            ProtoLog.d(PROTO_LOG_GROUP,
+                    "%s: aborting due to canceled shift animation", startNewTask);
         }
     }
 }

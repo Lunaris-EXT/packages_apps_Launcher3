@@ -17,6 +17,7 @@
 package com.android.launcher3.shortcuts;
 
 import static com.android.launcher3.AbstractFloatingView.TYPE_FOLDER;
+import static com.android.launcher3.Flags.blurOnMoreSurfaces;
 import static com.android.launcher3.model.data.ItemInfoWithIcon.FLAG_NOT_PINNABLE;
 
 import android.content.Context;
@@ -33,6 +34,7 @@ import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.View;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 
 import com.android.launcher3.AbstractFloatingView;
 import com.android.launcher3.BubbleTextView;
@@ -62,7 +64,7 @@ public class DeepShortcutView extends FrameLayout implements BubbleTextHolder {
 
     private BubbleTextView mBubbleText;
     private View mIconView;
-    private FrameLayout mAddButton;
+    private ImageView mAddButton;
 
     private WorkspaceItemInfo mInfo;
     private ShortcutInfo mDetail;
@@ -109,7 +111,7 @@ public class DeepShortcutView extends FrameLayout implements BubbleTextHolder {
             return;
         }
         Drawable background = getBackground();
-        if (background instanceof LayerDrawable l && l.getNumberOfLayers() > 1) {
+        if (blurOnMoreSurfaces() && background instanceof LayerDrawable l) {
             // When we use blur, we have a LayerDrawable of
             // [BackgroundBlurDrawable, GradientDrawable] as the background.
             background = l.getDrawable(1);
@@ -183,7 +185,9 @@ public class DeepShortcutView extends FrameLayout implements BubbleTextHolder {
     }
 
     private boolean isPinnable(PopupContainerWithArrow container) {
-        BubbleTextView bbtv = container.getOriginalIcon();
+        if (!(container.getOriginalIcon() instanceof BubbleTextView bbtv)) {
+            return false;
+        }
         boolean isPinnable = false;
         if (bbtv.getTag() instanceof ItemInfoWithIcon infoWithIcon) {
             isPinnable = (infoWithIcon.runtimeStatusFlags & FLAG_NOT_PINNABLE) == 0;

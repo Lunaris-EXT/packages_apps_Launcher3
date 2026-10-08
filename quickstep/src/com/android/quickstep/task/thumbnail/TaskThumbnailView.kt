@@ -31,11 +31,11 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import androidx.annotation.ColorInt
 import androidx.core.view.isInvisible
-import com.android.launcher3.Flags.enableRefactorTaskContentView
 import com.android.launcher3.LauncherAnimUtils.VIEW_ALPHA
 import com.android.launcher3.R
 import com.android.launcher3.util.MultiPropertyFactory
 import com.android.launcher3.util.ViewPool
+import com.android.quickstep.task.thumbnail.TaskThumbnailUiState.AppLocked
 import com.android.quickstep.task.thumbnail.TaskThumbnailUiState.BackgroundOnly
 import com.android.quickstep.task.thumbnail.TaskThumbnailUiState.LiveTile
 import com.android.quickstep.task.thumbnail.TaskThumbnailUiState.Snapshot
@@ -50,6 +50,7 @@ class TaskThumbnailView : FrameLayout, ViewPool.Reusable {
     private val thumbnailView: FixedSizeImageView by lazy { findViewById(R.id.task_thumbnail) }
     private val splashBackground: View by lazy { findViewById(R.id.splash_background) }
     private val splashIcon: FixedSizeImageView by lazy { findViewById(R.id.splash_icon) }
+    private val appLockIcon: FixedSizeImageView by lazy { findViewById(R.id.app_lock_icon) }
     private val dimAlpha: MultiPropertyFactory<View> by lazy {
         MultiPropertyFactory(scrimView, VIEW_ALPHA, ScrimViewAlpha.entries.size, ::maxOf)
     }
@@ -78,6 +79,22 @@ class TaskThumbnailView : FrameLayout, ViewPool.Reusable {
             invalidateOutline()
         }
 
+    var parentScaleX = 1f
+        set(value) {
+            field = value
+            // Splash icon should ignore scale on TTV
+            splashIcon.scaleX = 1 / value
+            invalidateOutline()
+        }
+
+    var parentScaleY = 1f
+        set(value) {
+            field = value
+            // Splash icon should ignore scale on TTV
+            splashIcon.scaleY = 1 / value
+            invalidateOutline()
+        }
+
     constructor(context: Context) : super(context)
 
     constructor(context: Context, attrs: AttributeSet?) : super(context, attrs)
@@ -90,9 +107,6 @@ class TaskThumbnailView : FrameLayout, ViewPool.Reusable {
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        if (enableRefactorTaskContentView()) {
-            return
-        }
         clipToOutline = true
         outlineProvider =
             object : ViewOutlineProvider() {
@@ -105,8 +119,8 @@ class TaskThumbnailView : FrameLayout, ViewPool.Reusable {
                             outlineRect.top.toFloat(),
                             outlineRect.right.toFloat(),
                             outlineRect.bottom.toFloat(),
-                            cornerRadius / scaleX,
-                            cornerRadius / scaleY,
+                            cornerRadius / scaleX / parentScaleX,
+                            cornerRadius / scaleY / parentScaleY,
                             Path.Direction.CW,
                         )
                     }
@@ -117,13 +131,7 @@ class TaskThumbnailView : FrameLayout, ViewPool.Reusable {
 
     override fun onRecycle() {
         uiState = Uninitialized
-        task = null
-        lastMatrix = null
-        overlaid = false
-        if (!enableRefactorTaskContentView()) {
-            onSizeChanged = null
-            outlineBounds = null
-        }
+        outlineBounds = null
         resetViews()
     }
 
@@ -149,6 +157,7 @@ class TaskThumbnailView : FrameLayout, ViewPool.Reusable {
             is LiveTile -> drawLiveWindow()
             is SnapshotSplash -> drawSnapshotSplash(state)
             is BackgroundOnly -> drawBackground(state.backgroundColor)
+            is AppLocked -> drawAppLocked(state.backgroundColor)
         }
         if (state is SnapshotSplash) {
             lastMatrix?.let { thumbnailView.imageMatrix = it }
@@ -174,49 +183,11 @@ class TaskThumbnailView : FrameLayout, ViewPool.Reusable {
         splashIcon.alpha = value
     }
 
-    fun doOnSizeChange(action: (width: Int, height: Int) -> Unit) {
-        if (enableRefactorTaskContentView()) {
-            return
-        }
-        onSizeChanged = action
-    }
-
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-        if (enableRefactorTaskContentView()) {
-            return
-        }
         super.onSizeChanged(w, h, oldw, oldh)
         onSizeChanged?.invoke(width, height)
         bounds.set(0, 0, w, h)
         invalidateOutline()
-    }
-
-    override fun setScaleX(scaleX: Float) {
-        if (enableRefactorTaskContentView()) {
-            return
-        }
-        super.setScaleX(scaleX)
-        // Splash icon should ignore scale on TTV
-        splashIcon.scaleX = 1 / scaleX
-    }
-
-    override fun setScaleY(scaleY: Float) {
-        if (enableRefactorTaskContentView()) {
-            return
-        }
-        super.setScaleY(scaleY)
-        // Splash icon should ignore scale on TTV
-        splashIcon.scaleY = 1 / scaleY
-    }
-
-    fun parentScaleXUpdated(scaleX: Float) {
-        // Splash icon should ignore scale on TTV
-        splashIcon.scaleX = 1 / scaleX
-    }
-
-    fun parentScaleYUpdated(scaleY: Float) {
-        // Splash icon should ignore scale on TTV
-        splashIcon.scaleY = 1 / scaleY
     }
 
     private fun resetViews() {
@@ -227,6 +198,7 @@ class TaskThumbnailView : FrameLayout, ViewPool.Reusable {
         splashBackground.setBackgroundColor(Color.TRANSPARENT)
         splashIcon.alpha = 0f
         splashIcon.setImageDrawable(null)
+        appLockIcon.isInvisible = true
         scrimView.alpha = 0f
         alpha = 1.0f
         setBackgroundColor(Color.TRANSPARENT)
@@ -260,6 +232,11 @@ class TaskThumbnailView : FrameLayout, ViewPool.Reusable {
 
     private fun drawLiveWindow() {
         liveTileView.isInvisible = false
+    }
+
+    private fun drawAppLocked(@ColorInt background: Int) {
+        drawBackground(background)
+        appLockIcon.isInvisible = false
     }
 
     private fun drawSnapshotSplash(snapshotSplash: SnapshotSplash) {

@@ -44,6 +44,8 @@ import androidx.graphics.shapes.toPath
 import androidx.graphics.shapes.transformed
 import com.android.launcher3.Flags
 import com.android.launcher3.anim.SpringAnimationBuilder
+import com.android.launcher3.folder.Folder
+import com.android.launcher3.folder.FolderPagedView
 import com.android.launcher3.icons.RoundRectEstimator.estimateRadius
 import com.android.launcher3.views.ClipPathView
 
@@ -71,8 +73,6 @@ interface ShapeDelegate {
     fun addToPath(path: Path, offsetX: Float, offsetY: Float, radius: Float)
 
     fun addToPath(path: PathWrapper, offsetX: Float, offsetY: Float, radius: Float)
-
-    fun addToPathInBounds(path: Path, bounds: RectF)
 
     fun <T> createRevealAnimator(
         target: T,
@@ -157,14 +157,6 @@ interface ShapeDelegate {
             path.cornerRadius = cr
         }
 
-        override fun addToPathInBounds(path: Path, bounds: RectF) {
-            val cornerRadius = getCornerRadius(bounds)
-            path.addRoundRect(bounds, cornerRadius, cornerRadius, Path.Direction.CW)
-        }
-
-        private fun getCornerRadius(bounds: RectF): Float =
-            minOf(bounds.width(), bounds.height()) / 2f * radiusRatio
-
         override fun <T> createRevealAnimator(
             target: T,
             startRect: Rect,
@@ -189,6 +181,7 @@ interface ShapeDelegate {
             endRadius: Float,
             isReversed: Boolean,
         ): ValueAnimator where T : View, T : ClipPathView {
+            val startRadius = (startRect.width() / 2f) * radiusRatio
             val pathProvider = { progress: Float, path: PathWrapper ->
                 val radius = (1 - progress) * startRadius + progress * endRadius
                 val left = (1 - progress) * startRect.left + progress * endRect.left
@@ -199,9 +192,7 @@ interface ShapeDelegate {
                 path.setBounds(left, top, right, bottom)
                 path.cornerRadius = radius
             }
-            val shouldUseSpringAnimation =
-                Flags.enableLauncherIconShapes() && Flags.enableExpressiveFolderExpansion()
-            return if (shouldUseSpringAnimation) {
+            return if (useFolderSpringAnimation(target)) {
                 ClipSpringAnimBuilder(target, pathProvider).toAnim(isReversed)
             } else {
                 ClipAnimBuilder(target, pathProvider).toAnim(isReversed)
@@ -257,10 +248,6 @@ interface ShapeDelegate {
             path.estimateBoundsFromPath()
         }
 
-        override fun addToPathInBounds(path: Path, bounds: RectF) {
-            transformPathToBounds(path, bounds, Matrix())
-        }
-
         private fun addToPath(
             path: Path,
             offsetX: Float,
@@ -313,9 +300,7 @@ interface ShapeDelegate {
                 path.path.set(morph.toPath(progress, path.path))
                 path.estimateBoundsFromPath()
             }
-            val shouldUseSpringAnimation =
-                Flags.enableLauncherIconShapes() && Flags.enableExpressiveFolderExpansion()
-            return if (shouldUseSpringAnimation) {
+            return if (useFolderSpringAnimation(target)) {
                 ClipSpringAnimBuilder(target, pathProvider).toAnim(isReversed)
             } else {
                 ClipAnimBuilder(target, pathProvider).toAnim(isReversed)
@@ -325,8 +310,9 @@ interface ShapeDelegate {
 
     private class ClipAnimBuilder<T>(
         val target: T,
-        val pathProvider: (Float, PathWrapper) -> Unit,
-    ) : AnimatorListenerAdapter(), AnimatorUpdateListener where T : View, T : ClipPathView {
+        val pathProvider: (Float, PathWrapper) -> Unit
+    ) :
+        AnimatorListenerAdapter(), AnimatorUpdateListener where T : View, T : ClipPathView {
 
         private var oldOutlineProvider: ViewOutlineProvider? = null
         val path = PathWrapper()
@@ -363,8 +349,9 @@ interface ShapeDelegate {
 
     private class ClipSpringAnimBuilder<T>(
         val target: T,
-        val pathProvider: (Float, PathWrapper) -> Unit,
-    ) : AnimatorListenerAdapter() where T : View, T : ClipPathView {
+        val pathProvider: (Float, PathWrapper) -> Unit
+    ) :
+        AnimatorListenerAdapter() where T : View, T : ClipPathView {
 
         private var oldOutlineProvider: ViewOutlineProvider? = null
         val path = PathWrapper()
@@ -472,5 +459,11 @@ interface ShapeDelegate {
                 centerY = (bottom - top) / 2,
                 rounding = CornerRounding(cornerR),
             )
+    }
+
+    fun <T> useFolderSpringAnimation(target: T): Boolean {
+        return (target is Folder || target is FolderPagedView)
+            && Flags.enableLauncherIconShapes()
+            && Flags.enableExpressiveFolderExpansion()
     }
 }

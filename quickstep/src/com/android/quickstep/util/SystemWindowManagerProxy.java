@@ -21,20 +21,17 @@ import static android.view.Display.DEFAULT_DISPLAY;
 import android.content.Context;
 import android.graphics.Rect;
 import android.util.ArrayMap;
+import android.view.Display;
 import android.view.DisplayCutout;
 import android.view.Surface;
 import android.view.WindowManager;
 import android.view.WindowMetrics;
-import android.window.DesktopExperienceFlags;
 
 import com.android.internal.policy.SystemBarUtils;
 import com.android.launcher3.dagger.LauncherAppSingleton;
-import com.android.launcher3.statehandlers.DesktopVisibilityController;
 import com.android.launcher3.util.WindowBounds;
 import com.android.launcher3.util.window.CachedDisplayInfo;
 import com.android.launcher3.util.window.WindowManagerProxy;
-import com.android.quickstep.SystemUiProxy;
-import com.android.quickstep.window.RecentsWindowFlags;
 import com.android.wm.shell.shared.desktopmode.DesktopModeStatus;
 import com.android.wm.shell.shared.desktopmode.DesktopState;
 
@@ -49,19 +46,11 @@ import javax.inject.Inject;
 @LauncherAppSingleton
 public class SystemWindowManagerProxy extends WindowManagerProxy {
 
-    private final DesktopVisibilityController mDesktopVisibilityController;
-    private final SystemUiProxy mSystemUiProxy;
-
     private final DesktopState mDesktopState;
 
     @Inject
-    public SystemWindowManagerProxy(
-            DesktopVisibilityController desktopVisibilityController,
-            SystemUiProxy systemUiProxy,
-            DesktopState desktopState) {
+    public SystemWindowManagerProxy(DesktopState desktopState) {
         super(true);
-        mDesktopVisibilityController = desktopVisibilityController;
-        mSystemUiProxy = systemUiProxy;
         mDesktopState = desktopState;
     }
 
@@ -69,21 +58,6 @@ public class SystemWindowManagerProxy extends WindowManagerProxy {
     public Rect getCurrentBounds(Context displayInfoContext) {
         return displayInfoContext.getResources().getConfiguration().windowConfiguration
                 .getMaxBounds();
-    }
-
-    @Override
-    public void registerDesktopVisibilityListener(DesktopVisibilityListener listener) {
-        mDesktopVisibilityController.registerDesktopVisibilityListener(listener);
-    }
-
-    @Override
-    public void unregisterDesktopVisibilityListener(DesktopVisibilityListener listener) {
-        mDesktopVisibilityController.unregisterDesktopVisibilityListener(listener);
-    }
-
-    @Override
-    public boolean isInDesktopMode(int displayId) {
-        return mDesktopVisibilityController.isInDesktopMode(displayId);
     }
 
     @Override
@@ -96,15 +70,10 @@ public class SystemWindowManagerProxy extends WindowManagerProxy {
     }
 
     @Override
-    public boolean showLockedTaskbarOnHome(Context displayInfoContext) {
-        if (!DesktopModeStatus.canEnterDesktopMode(displayInfoContext)) {
-            return false;
-        }
-        if (!DesktopModeStatus.enterDesktopByDefaultOnFreeformDisplay(displayInfoContext)) {
-            return false;
-        }
-
-        return isDisplayDesktopFirst(displayInfoContext);
+    public boolean isExternalDisplay(Context displayInfoContext) {
+        // Built-in secondary displays (e.g. on dual screen devices) behave like the default one
+        return super.isExternalDisplay(displayInfoContext)
+                && getDisplay(displayInfoContext).getType() != Display.TYPE_INTERNAL;
     }
 
     @Override
@@ -117,16 +86,7 @@ public class SystemWindowManagerProxy extends WindowManagerProxy {
             return false;
         }
 
-        if (!DesktopExperienceFlags.ENABLE_DESKTOP_TASKBAR_ON_FREEFORM_DISPLAYS.isTrue()) {
-            return false;
-        }
-
         return isDisplayDesktopFirst(displayInfoContext);
-    }
-
-    @Override
-    public boolean isHomeVisible() {
-        return mSystemUiProxy.getHomeVisibilityState().isHomeVisible();
     }
 
     @Override
@@ -161,10 +121,5 @@ public class SystemWindowManagerProxy extends WindowManagerProxy {
     protected DisplayCutout rotateCutout(DisplayCutout original, int startWidth, int startHeight,
             int fromRotation, int toRotation) {
         return original.getRotated(startWidth, startHeight, fromRotation, toRotation);
-    }
-
-    @Override
-    public boolean enableOverviewOnConnectedDisplays() {
-        return RecentsWindowFlags.enableOverviewOnConnectedDisplays();
     }
 }

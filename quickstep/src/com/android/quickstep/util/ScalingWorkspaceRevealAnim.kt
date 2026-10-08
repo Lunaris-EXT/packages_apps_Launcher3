@@ -44,7 +44,7 @@ import com.android.launcher3.R
 import com.android.launcher3.anim.AnimatorListeners
 import com.android.launcher3.anim.PendingAnimation
 import com.android.launcher3.anim.PropertySetter
-import com.android.launcher3.statehandlers.DepthController
+import com.android.launcher3.statehandlers.LauncherDepthController
 import com.android.launcher3.states.StateAnimationConfig
 import com.android.launcher3.states.StateAnimationConfig.SKIP_DEPTH_CONTROLLER
 import com.android.launcher3.states.StateAnimationConfig.SKIP_OVERVIEW
@@ -97,6 +97,12 @@ class ScalingWorkspaceRevealAnim(
         SurfaceTransactionApplier(launcher.dragLayer)
 
     init {
+        // Interrupt the current animations, if any.
+        cancelAnimations()
+
+        val workspace = launcher.workspace
+        val hotseat = launcher.hotseat
+
         // Make sure the starting state is right for the animation.
         val setupConfig = StateAnimationConfig()
         setupConfig.animFlags = SKIP_OVERVIEW.or(SKIP_DEPTH_CONTROLLER).or(SKIP_SCRIM)
@@ -107,7 +113,7 @@ class ScalingWorkspaceRevealAnim(
         launcher
             .getOverviewPanel<RecentsView<QuickstepLauncher, LauncherState>>()
             .forceFinishScroller()
-        launcher.workspace.stateTransitionAnimation.setScrim(
+        workspace.stateTransitionAnimation.setScrim(
             PropertySetter.NO_ANIM_PROPERTY_SETTER,
             LauncherState.BACKGROUND_APP,
             setupConfig,
@@ -115,13 +121,6 @@ class ScalingWorkspaceRevealAnim(
         if (playBlur) {
             addBlurLayer()
         }
-
-        val workspace = launcher.workspace
-        val hotseat = launcher.hotseat
-
-        // Interrupt the current animation, if any.
-        Animations.cancelOngoingAnimation(workspace)
-        Animations.cancelOngoingAnimation(hotseat)
 
         val fromSize =
             if (workspace.scaleX != MAX_SIZE) {
@@ -174,7 +173,7 @@ class ScalingWorkspaceRevealAnim(
         val transitionConfig = StateAnimationConfig()
         transitionConfig.duration = SCALE_DURATION_MS
 
-        var depthController: DepthController? = null
+        var depthController: LauncherDepthController? = null
         if (playBlur) {
             // Match the Wallpaper depth to the rest of the content.
             depthController = (launcher as? QuickstepLauncher)?.depthController
@@ -188,17 +187,10 @@ class ScalingWorkspaceRevealAnim(
             )
 
             // Add a blur animation to the scrim layer.
-            var maxBlurRadius =
-                launcher.resources.getDimensionPixelSize(
-                    if (Flags.allAppsBlur() || Flags.enableOverviewBackgroundWallpaperBlur()) {
-                        R.dimen.max_depth_blur_radius_enhanced
-                    } else {
-                        R.integer.max_depth_blur_radius
-                    }
-                )
+            val maxBlurRadius =
+                launcher.resources.getDimensionPixelSize(R.dimen.max_depth_blur_radius_enhanced)
             val blurAnimator = ValueAnimator.ofFloat(1f, 0f)
-            blurAnimator.setInterpolator(BLUR_INTERPOLATOR)
-            var lastBlurRadius = -1
+            blurAnimator.interpolator = BLUR_INTERPOLATOR
             blurAnimator.addUpdateListener {
                 val blurRadius = (maxBlurRadius * blurAnimator.animatedValue as Float).toInt()
                 // Always apply when reaching 0 to ensure final state is clean.
@@ -327,8 +319,14 @@ class ScalingWorkspaceRevealAnim(
         return LauncherPrefs.get(launcher).get(LauncherPrefs.APP_LAUNCH_BLUR_ENABLED)
     }
 
+    /** Interrupt the currently running animation, if any. */
+    fun cancelAnimations() {
+        Animations.cancelOngoingAnimation(launcher.workspace)
+        Animations.cancelOngoingAnimation(launcher.hotseat)
+    }
+
     private fun addBlurLayer() {
-        if (!isAppLaunchBlurEnabled()) {
+        if (!Flags.blurredHomeAnimation()) {
             return
         }
         val parent = launcher.dragLayer.viewRootImpl?.surfaceControl ?: return
