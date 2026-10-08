@@ -475,13 +475,6 @@ flag {
 }
 
 flag {
-  name: "blur_on_more_surfaces"
-  namespace: "launcher"
-  description: "Enable blur in more Launcher surfaces"
-  bug: "444141641"
-}
-
-flag {
   name: "enable_new_touchpad_gestures"
   namespace: "launcher"
   description: "Update touchpad gestures to match 26Q2 spec."
@@ -753,11 +746,4 @@ flag {
   metadata {
     purpose: PURPOSE_BUGFIX
   }
-}
-
-flag {
-  name: "app_launch_blur"
-  namespace: "launcher"
-  description: "Enable background blur at app launch"
-  bug: "379905951"
 }
